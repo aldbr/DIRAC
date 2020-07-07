@@ -481,8 +481,11 @@ class ComputingElement(object):
     print(line)
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, dummy=None, processors=1):  # pylint: disable=unused-argument
+  def submitJob(self, executableFile, **kwargs):  # pylint: disable=unused-argument
     """ Method to submit job, should be overridden in sub-class.
+
+    :param str executableFile: file to execute via systemCall
+    :param dict kwargs: take additional arguments coming from subclasses to avoid "missing argument" failures
     """
     name = 'submitJob()'
     self.log.error('ComputingElement should be implemented in a subclass', name)

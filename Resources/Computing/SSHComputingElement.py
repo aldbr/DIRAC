@@ -487,7 +487,14 @@ class SSHComputingElement(ComputingElement):
     else:
       return S_ERROR('\n'.join([sshStdout, sshStderr]))
 
-  def submitJob(self, executableFile, proxy, numberOfJobs=1):
+  def submitJob(self, executableFile, proxy=None, numberOfJobs=1, **kwargs):
+    """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param str proxy: proxy used for running the job (the payload)
+    :param int numberOfJobs: number of jobs to submit
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
+    """
 
     #    self.log.verbose( "Executable file path: %s" % executableFile )
     if not os.access(executableFile, 5):

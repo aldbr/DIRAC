@@ -866,7 +866,7 @@ class SiteDirector(AgentModule):
                                                           jobExecDir=jobExecDir,
                                                           envVariables=envVariables)
 
-    submitResult = ce.submitJob(executable, '', pilotSubmissionChunk)
+    submitResult = ce.submitJob(executable, proxy='', numberOfJobs=pilotSubmissionChunk)
     # FIXME: The condor thing only transfers the file with some
     # delay, so when we unlink here the script is gone
     # FIXME 2: but at some time we need to clean up the pilot wrapper scripts...

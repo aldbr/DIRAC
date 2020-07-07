@@ -195,8 +195,13 @@ class ARCComputingElement(ComputingElement):
     return S_OK()
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, numberOfJobs=1, processors=1):
+  def submitJob(self, executableFile, numberOfJobs=1, numberOfProcessors=1, **kwargs):
     """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall
+    :param int numberOfJobs: number of jobs to submit
+    :param int numberOfProcessors: number of processors to use
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
 
     # Assume that the ARC queues are always of the format nordugrid-<batchSystem>-<queue>
@@ -223,7 +228,7 @@ class ARCComputingElement(ComputingElement):
       # The basic job description
       jobdescs = arc.JobDescriptionList()
       # Get the job into the ARC way
-      xrslString, diracStamp = self.__writeXRSL(executableFile, processors)
+      xrslString, diracStamp = self.__writeXRSL(executableFile, numberOfProcessors)
       gLogger.debug("XRSL string submitted : %s" % xrslString)
       gLogger.debug("DIRAC stamp for job : %s" % diracStamp)
       if not arc.JobDescription_Parse(xrslString, jobdescs):

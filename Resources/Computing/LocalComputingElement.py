@@ -136,6 +136,13 @@ class LocalComputingElement(ComputingElement):
     return S_OK()
 
   def submitJob(self, executableFile, proxy=None, numberOfJobs=1):
+    """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param str proxy: the proxy used for running the job (the payload). It will be dumped to a file.
+    :param int numberOfJobs: number of jobs to submit
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
+    """
 
     if not os.access(executableFile, 5):
       os.chmod(executableFile, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)

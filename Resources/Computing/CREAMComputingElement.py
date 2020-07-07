@@ -103,8 +103,13 @@ class CREAMComputingElement(ComputingElement):
     return S_OK()
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, numberOfJobs=1, processors=1):
+  def submitJob(self, executableFile, numberOfJobs=1, numberOfProcessors=1, **kwargs):
     """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param int numberOfJobs: number of jobs to submit
+    :param int numberOfProcessors: number of processors to use
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
 
     self.log.verbose("Executable file path: %s" % executableFile)
@@ -114,7 +119,7 @@ class CREAMComputingElement(ComputingElement):
     batchIDList = []
     stampDict = {}
     if numberOfJobs == 1:
-      jdlName, diracStamp = self.__writeJDL(executableFile, processors=processors)
+      jdlName, diracStamp = self.__writeJDL(executableFile, processors=numberOfProcessors)
       cmd = ['glite-ce-job-submit', '-n', '-a', '-N', '-r',
              '%s/%s' % (self.ceName, self.queue),
              '%s' % jdlName]
@@ -141,7 +146,7 @@ class CREAMComputingElement(ComputingElement):
         self.log.error('Failed to delegate proxy', result['Message'])
         return result
       for _i in range(numberOfJobs):
-        jdlName, diracStamp = self.__writeJDL(executableFile, processors=processors)
+        jdlName, diracStamp = self.__writeJDL(executableFile, processors=numberOfProcessors)
         cmd = ['glite-ce-job-submit', '-n', '-N', '-r',
                '%s/%s' % (self.ceName, self.queue),
                '-D', '%s' % delegationID, '%s' % jdlName]

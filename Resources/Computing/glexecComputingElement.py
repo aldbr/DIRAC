@@ -39,8 +39,12 @@ class glexecComputingElement(ComputingElement):
     # Now glexec specific ones
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, dummy=None):
+  def submitJob(self, executableFile, proxy, **kwargs):
     """ Method to submit job, should be overridden in sub-class.
+
+    :param str executableFile: file to execute via systemCall.
+    :param str proxy: proxy used for running the job (the payload)
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
     self.log.verbose('Setting up proxy for payload')
     result = self.writeProxyToFile(proxy)

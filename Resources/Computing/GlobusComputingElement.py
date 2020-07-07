@@ -56,8 +56,12 @@ class GlobusComputingElement(ComputingElement):
     return S_OK()
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, numberOfJobs=1):
+  def submitJob(self, executableFile, numberOfJobs=1, **kwargs):
     """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param int numberOfJobs: number of jobs to submit
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
 
     self.log.verbose("Executable file path: %s" % executableFile)

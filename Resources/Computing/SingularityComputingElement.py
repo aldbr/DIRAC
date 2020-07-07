@@ -257,6 +257,13 @@ class SingularityComputingElement(ComputingElement):
     """ Start a container for a job.
         executableFile is ignored. A new wrapper suitable for running in a
         container is created from jobDesc.
+
+    :param str executableFile: location of the executable file
+    :param str proxy: payload proxy
+    :param dict jobDesc: job description
+    :param logging log: logger object
+    :param str logLevel: level of the logger
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
     rootImage = self.__root
 

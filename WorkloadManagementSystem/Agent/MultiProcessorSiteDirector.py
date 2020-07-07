@@ -333,7 +333,7 @@ class MultiProcessorSiteDirector(SiteDirector):
                                                                 bundleProxy=bundleProxy,
                                                                 jobExecDir=jobExecDir,
                                                                 processors=processors)
-          result = ce.submitJob(executable, '', pilotSubmissionChunk, processors=processors)
+          result = ce.submitJob(executable, proxy='', numberOfJobs=pilotSubmissionChunk, processors=processors)
           # ## FIXME: The condor thing only transfers the file with some
           # ## delay, so when we unlink here the script is gone
           # ## FIXME 2: but at some time we need to clean up the pilot wrapper scripts...

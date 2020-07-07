@@ -66,8 +66,13 @@ class BOINCComputingElement(ComputingElement):
 
 ###############################################################################
 
-  def submitJob(self, executableFile, proxy=None, numberOfJobs=1):
+  def submitJob(self, executableFile, proxy=None, numberOfJobs=1, **kwargs):
     """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param str proxy: proxy used for running the job (the payload)
+    :param int numberOfJobs: number of jobs to submit
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
     self.createClient()
     # Check if the client is ready

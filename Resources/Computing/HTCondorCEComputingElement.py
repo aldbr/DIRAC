@@ -244,8 +244,13 @@ Queue %(nJobs)s
     return S_OK()
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, numberOfJobs=1, processors=1):
+  def submitJob(self, executableFile, numberOfJobs=1, numberOfProcessors=1, **kwargs):
     """ Method to submit job
+
+    :param str executableFile: file to execute via systemCall.
+    :param int numberOfJobs: number of jobs to submit
+    :param int numberOfProcessors: number of processors to use
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
 
     self.log.verbose("Executable file path: %s" % executableFile)
@@ -262,7 +267,7 @@ Queue %(nJobs)s
 
     # We randomize the location of the pilot output and log, because there are just too many of them
     location = logDir(self.ceName, commonJobStampPart)
-    subName = self.__writeSub(executableFile, numberOfJobs, location, processors)
+    subName = self.__writeSub(executableFile, numberOfJobs, location, numberOfProcessors)
 
     cmd = ['condor_submit', '-terse', subName]
     # the options for submit to remote are different than the other remoteScheddOptions

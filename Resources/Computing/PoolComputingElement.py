@@ -88,15 +88,21 @@ class PoolComputingElement(ComputingElement):
     return processorsInUse
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, **kwargs):
+  def submitJob(self, executableFile, proxy, numberOfProcessors=1, maxNumberOfProcessors=None,
+                wholeNode=False, mpTag=False, jobDesc=None, **kwargs):
     """ Method to submit job.
 
     :param str executableFile: location of the executable file
     :param str proxy: payload proxy
+    :param int numberOfProcessors: number of processors to use
+    :param int maxNumberOfProcessors: max number of processors to use
+    :param bool wholeNode: when enabled, use the available processor on the node
+    :param bool mpTag: when enabled, allow multi-processor usage
+    :param dict jobDesc: job description
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
 
     :return: S_OK/S_ERROR of the result of the job submission
     """
-
     if self.pPool is None:
       self.pPool = ProcessPool(minSize=self.processors,
                                maxSize=self.processors,
@@ -104,7 +110,7 @@ class PoolComputingElement(ComputingElement):
 
     self.pPool.processResults()
 
-    processorsForJob = self._getProcessorsForJobs(kwargs)
+    processorsForJob = self._getProcessorsForJobs(numberOfProcessors, maxNumberOfProcessors, wholeNode, mpTag)
     if not processorsForJob:
       return S_ERROR('Not enough processors for the job')
 
@@ -114,7 +120,10 @@ class PoolComputingElement(ComputingElement):
     if not res['OK']:
       self.log.error("Could not load pilot.cfg", res['Message'])
     # only NumberOfProcessors for now, but RAM (or other stuff) can also be added
-    jobID = int(kwargs.get('jobDesc', {}).get('jobID', 0))
+    jobID = 0
+    if jobDesc:
+      jobID = int(jobDesc.get('jobID', 0))
+
     cd.setOptionInCFG('/Resources/Computing/JobLimits/%d/NumberOfProcessors' % jobID, processorsForJob)
     res = cd.dumpLocalCFGToFile('pilot.cfg')
     if not res['OK']:
@@ -148,7 +157,7 @@ class PoolComputingElement(ComputingElement):
 
     return result
 
-  def _getProcessorsForJobs(self, kwargs):
+  def _getProcessorsForJobs(self, numberOfProcessors, maxNumberOfProcessors, wholeNode, mpTag):
     """ helper function
     """
     processorsInUse = self.getProcessorsInUse()
@@ -158,31 +167,27 @@ class PoolComputingElement(ComputingElement):
                      "(%d, %d, %d)" % (self.processors, processorsInUse, availableProcessors))
 
     # Does this ask for MP?
-    if not kwargs.get('mpTag', False):
+    if not mpTag:
       if availableProcessors:
         return 1
       else:
         return 0
 
     # From here we assume the job is asking for MP
-    if kwargs.get('wholeNode', False):
+    if wholeNode:
       if processorsInUse > 0:
         return 0
       else:
         return self.processors
 
-    if "numberOfProcessors" in kwargs:
-      requestedProcessors = int(kwargs['numberOfProcessors'])
-    else:
-      requestedProcessors = 1
-
+    requestedProcessors = int(numberOfProcessors)
     if availableProcessors < requestedProcessors:
       return 0
 
     # If there's a maximum number of processors allowed for the job, use that as maximum,
     # otherwise it will use all the remaining processors
-    if 'maxNumberOfProcessors' in kwargs and kwargs['maxNumberOfProcessors']:
-      requestedProcessors = min(int(kwargs['maxNumberOfProcessors']), availableProcessors)
+    if maxNumberOfProcessors:
+      requestedProcessors = min(int(maxNumberOfProcessors), availableProcessors)
 
     return requestedProcessors
 

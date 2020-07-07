@@ -45,7 +45,8 @@ class JobAgent(AgentModule):
       properties = {}
     super(JobAgent, self).__init__(agentName, loadName, baseAgentName, properties)
 
-    self.ceName = 'InProcess'
+    self.ceType = 'InProcess'
+    self.ceName = None
     self.computingElement = None
     self.timeLeft = 0.0
 
@@ -78,7 +79,8 @@ class JobAgent(AgentModule):
     self.am_setOption('MonitoringEnabled', False)
     self.am_setOption('MaxCycles', loops)
 
-    ceType = self.am_getOption('CEType', self.ceName)
+    ceType = self.am_getOption('CEType', self.ceType)
+    ceName = self.am_getOption('CEName', self.ceName)
     localCE = gConfig.getValue('/LocalSite/LocalCE', '')
     if localCE:
       self.log.info('Defining CE from local configuration', '= %s' % localCE)
@@ -86,8 +88,9 @@ class JobAgent(AgentModule):
 
     # Create backend Computing Element
     ceFactory = ComputingElementFactory()
-    self.ceName = ceType
-    ceInstance = ceFactory.getCE(ceType)
+    self.ceType = ceType
+    self.ceName = ceName
+    ceInstance = ceFactory.getCE(self.ceType, self.ceName)
     if not ceInstance['OK']:
       self.log.warn("Can't instantiate a CE", ceInstance['Message'])
       return ceInstance
@@ -375,7 +378,7 @@ class JobAgent(AgentModule):
     """Save job JDL local to JobAgent.
     """
     classAdJob = ClassAd(jobJDL)
-    classAdJob.insertAttributeString('LocalCE', self.ceName)
+    classAdJob.insertAttributeString('LocalCE', self.ceType)
     jdlFileName = jobID + '.jdl'
     jdlFile = open(jdlFileName, 'w')
     jdl = classAdJob.asJDL()
@@ -504,7 +507,8 @@ class JobAgent(AgentModule):
       return S_ERROR('Payload Proxy Not Found')
 
     payloadProxy = proxy['Value']
-    submission = self.computingElement.submitJob(wrapperFile, payloadProxy,
+    submission = self.computingElement.submitJob(wrapperFile,
+                                                 proxy=payloadProxy,
                                                  numberOfProcessors=processors,
                                                  maxNumberOfProcessors=maxNumberOfProcessors,
                                                  wholeNode=wholeNode,

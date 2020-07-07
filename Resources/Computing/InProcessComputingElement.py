@@ -36,12 +36,13 @@ class InProcessComputingElement(ComputingElement):
     self.ceParameters['MaxTotalJobs'] = 1
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, **kwargs):
+  def submitJob(self, executableFile, proxy=None, **kwargs):
     """ Method to submit job (overriding base method).
 
     :param str executableFile: file to execute via systemCall.
                                Normally the JobWrapperTemplate when invoked by the JobAgent.
     :param str proxy: the proxy used for running the job (the payload). It will be dumped to a file.
+    :param dict kwargs: take additional arguments coming from other CE classes to avoid "missing argument" failures
     """
     ret = getProxyInfo()
     if not ret['OK']:
