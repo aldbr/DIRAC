@@ -7,12 +7,14 @@
 """
 
 from __future__ import absolute_import
+import time
 __RCSID__ = "$Id$"
 
 from DIRAC import S_OK, S_ERROR, gConfig
 from DIRAC.Core.Base.AgentModule import AgentModule
 from DIRAC.Core.Utilities import Time
 from DIRAC.ConfigurationSystem.Client.Helpers import Registry
+from DIRAC.ConfigurationSystem.Client.Helpers.Resources import getQueues
 from DIRAC.Core.Utilities.SiteCEMapping import getSiteForCE
 from DIRAC.Interfaces.API.DiracAdmin import DiracAdmin
 from DIRAC.AccountingSystem.Client.Types.Pilot import Pilot as PilotAccounting
@@ -52,26 +54,28 @@ class PilotStatusAgent(AgentModule):
   def initialize(self):
     """Sets defaults
     """
-
-    self.am_setOption('PollingTime', 120)
-    self.am_setOption('GridEnv', '')
-    self.am_setOption('PilotStalledDays', 3)
     self.pilotDB = PilotAgentsDB()
     self.diracadmin = DiracAdmin()
     self.jobDB = JobDB()
-    self.clearPilotsDelay = self.am_getOption('ClearPilotsDelay', 30)
-    self.clearAbortedDelay = self.am_getOption('ClearAbortedPilotsDelay', 7)
     self.pilots = PilotManagerClient()
 
     return S_OK()
 
   #############################################################################
+  def beginExecution(self):
+    """ This is run at every cycle, as first thing.
+    """
+    self.clearPilotsDelay = self.am_getOption('ClearPilotsDelay', 30)
+    self.clearAbortedDelay = self.am_getOption('ClearAbortedPilotsDelay', 7)
+    self.pilotStalledDays = self.am_getOption('PilotStalledDays', 3)
+    self.gridEnv = self.am_getOption('GridEnv', '')
+
+    return S_OK()
+
+
   def execute(self):
     """The PilotAgent execution method.
     """
-
-    self.pilotStalledDays = self.am_getOption('PilotStalledDays', 3)
-    self.gridEnv = self.am_getOption('GridEnv')
     if not self.gridEnv:
       # No specific option found, try a general one
       setup = gConfig.getValue('/DIRAC/Setup', '')
@@ -85,9 +89,12 @@ class PilotStatusAgent(AgentModule):
     else:
       return result
 
-    # Now handle pilots not updated in the last N days (most likely the Broker is no
-    # longer available) and declare them Deleted.
-    result = self.handleOldPilots(connection)
+    pilotStalledDaysDict = self._getPilotStalledDaysPerCEs()
+
+    for pilotStalledDays, ces in pilotStalledDaysDict.items():
+      # Now handle pilots not updated in the last N days (most likely the Broker is no
+      # longer available) and declare them Deleted.
+      result = self.handleOldPilots(connection, pilotStalledDays, ces)
 
     connection.close()
 
@@ -96,6 +103,25 @@ class PilotStatusAgent(AgentModule):
       self.log.warn('Failed to clear old pilots in the PilotAgentsDB')
 
     return S_OK()
+
+  def _getPilotStalledDaysPerCEs(self):
+    """ Builds a dictionary (pilotStalledDays, CEs) and returns it.
+        Some queues might keep pilots for a long time, thus admins may set a specific PilotStalledDays value at the
+        CE level.
+    """
+    result = getQueues()
+    if not result['OK']:
+      return result
+    resourceDict = result['Value']
+
+    pilotStalledDaysDict = {}
+    for site in resourceDict:
+      for ce in resourceDict[site]:
+        pilotStalledDaysCE = resourceDict[site][ce].get('PilotStalledDays', self.pilotStalledDays)
+        if not pilotStalledDaysCE in pilotStalledDaysDict:
+          pilotStalledDaysDict[pilotStalledDaysCE] = []
+        pilotStalledDaysDict[pilotStalledDaysCE].append(ce)
+    return pilotStalledDaysDict
 
   def clearWaitingPilots(self, condDict):
     """ Clear pilots in the faulty Waiting state
@@ -163,16 +189,22 @@ class PilotStatusAgent(AgentModule):
         return S_ERROR('Failed to add children')
     return S_OK()
 
-  def handleOldPilots(self, connection):
+  def handleOldPilots(self, connection, pilotStalledDays, ces):
     """
       select all pilots that have not been updated in the last N days and declared them
       Deleted, accounting for them.
     """
     pilotsToAccount = {}
-    timeLimitToConsider = Time.toString(Time.dateTime() - Time.day * self.pilotStalledDays)
-    result = self.pilotDB.selectPilots({'Status': self.queryStateList},
+    timeLimitToConsider = Time.toString(Time.dateTime() - Time.day * pilotStalledDays)
+    start = time.time()
+    result = self.pilotDB.selectPilots({'Status': self.queryStateList,
+                                        'DestinationSite': ces},
                                        older=timeLimitToConsider,
                                        timeStamp='LastUpdateTime')
+    end = time.time()
+    with open('/home/dirac/tmp/test.log', 'a') as f:
+      f.write("%s\n" % (end - start))
+
     if not result['OK']:
       self.log.error('Failed to get the Pilot Agents')
       return result
@@ -188,7 +220,7 @@ class PilotStatusAgent(AgentModule):
     pilotsDict = result['Value']
 
     for pRef in pilotsDict:
-      if pilotsDict[pRef].get('Jobs') and self._checkJobLastUpdateTime(pilotsDict[pRef]['Jobs'], self.pilotStalledDays):
+      if pilotsDict[pRef].get('Jobs') and self._checkJobLastUpdateTime(pilotsDict[pRef]['Jobs'], pilotStalledDays):
         self.log.debug('%s should not be deleted since one job of %s is running.' %
                        (str(pRef), str(pilotsDict[pRef]['Jobs'])))
         continue
