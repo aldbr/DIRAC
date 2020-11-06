@@ -147,7 +147,8 @@ class TimeLeft(object):
         'PBS': 'PBS_JOBID',
         'BQS': 'QSUB_REQNAME',
         'SGE': 'SGE_TASK_ID',
-        'SLURM': 'SLURM_JOB_ID'}  # more to be added later
+        'SLURM': 'SLURM_JOB_ID',
+        'HTCondor': '_CONDOR_JOB_AD'}  # more to be added later
     name = None
     for batchSystem, envVar in batchSystems.items():
       if envVar in os.environ:
