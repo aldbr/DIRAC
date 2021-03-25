@@ -491,7 +491,7 @@ class ComputingElement(object):
     print(line)
 
   #############################################################################
-  def submitJob(self, executableFile, proxy, dummy=None, processors=1):  # pylint: disable=unused-argument
+  def submitJob(self, executableFile, proxy, dummy=None, processors=1, input=None):  # pylint: disable=unused-argument
     """ Method to submit job, should be overridden in sub-class.
     """
     name = 'submitJob()'
