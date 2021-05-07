@@ -93,18 +93,6 @@ def logDir(ceName, stamp):
   return os.path.join(ceName, stamp[0], stamp[1:3])
 
 
-@deprecated("Please use condorIDAndPathToResultFromJobRef")
-def condorIDFromJobRef(jobRef):
-  """Extract tuple of jobURL and jobID from the jobRef string.
-
-:param str jobRef: PilotJobReference of the following form: ``htcondorce://<ceName>/<pathToResult>-<condorID>``
-
-:return: tuple composed of the jobURL and the condorID of the given jobRef
-  """
-  jobURL, _, condorID = condorIDAndPathToResultFromJobRef(jobRef)
-  return jobURL, condorID
-
-
 def condorIDAndPathToResultFromJobRef(jobRef):
   """ Extract tuple of jobURL and jobID from the jobRef string.
   The condorID as well as the path leading to the job results are also extracted from the jobID.
@@ -125,7 +113,7 @@ def condorIDAndPathToResultFromJobRef(jobRef):
   return jobURL, pathToResult, condorID
 
 
-def findFile(workingDir, fileName, pathToResult=None):
+def findFile(workingDir, fileName, pathToResult):
   """ Find a file in a file system.
 
   :param str workingDir: the name of the directory containing the given file to search for
@@ -134,23 +122,10 @@ def findFile(workingDir, fileName, pathToResult=None):
 
   :return: list of paths leading to the file
   """
-
-  # In the case pathToResult is defined, we just have to check the path exists
-  if pathToResult:
-    path = os.path.join(workingDir, pathToResult, fileName)
-    if os.path.exists(path):
-      # We put the path in a list to be consistent
-      return S_OK([path])
-
-  # In the case pathToResult is not defined or not correct
-  # We have to search for the file in workingDir and can get multiple results
-  res = Subprocess().systemCall("find %s -name '%s'" % (workingDir, fileName), shell=True)
-  if not res['OK']:
-    return res
-  paths = res['Value'][1].splitlines()
-  if not paths:
-    return S_ERROR(errno.ENOENT, "Could not find %s in directory %s" % (fileName, workingDir))
-  return S_OK(paths)
+  path = os.path.join(workingDir, pathToResult, fileName)
+  if os.path.exists(path):
+    return S_OK(path)
+  return S_ERROR(errno.ENOENT, "Could not find %s" % path)
 
 
 def getCondorLogFile(pilotRef):
@@ -171,10 +146,6 @@ class HTCondorCEComputingElement(ComputingElement):
   """ HTCondorCE computing element class
       implementing the functions jobSubmit, getJobOutput
   """
-
-  # static variables to ensure single cleanup every minute
-  _lastCleanupTime = datetime.datetime.utcnow()
-  _cleanupLock = threading.Lock()
 
   #############################################################################
   def __init__(self, ceUniqueID):
@@ -308,13 +279,16 @@ Queue %(nJobs)s
 
     cmd = ['condor_submit', '-terse', subName]
     # the options for submit to remote are different than the other remoteScheddOptions
-    scheddOptions = [] if self.useLocalSchedd else ['-pool', '%s:9619' % self.ceName, '-remote', self.ceName]
+    # -spool: spool the executable so that it can be immediately deleted after the submission.
+    #         else, the job will never run: missing input
+    # -remote: submit to a remote condor_schedd and spool all the required inputs
+    scheddOptions = ['-spool'] if self.useLocalSchedd else ['-pool', '%s:9619' % self.ceName, '-remote', self.ceName]
     for op in scheddOptions:
       cmd.insert(-1, op)
 
     result = executeGridCommand(self.proxy, cmd, self.gridEnv)
     self.log.verbose(result)
-    os.unlink(subName)
+    os.remove(subName)
     if not result['OK']:
       self.log.error("Failed to submit jobs to htcondor", result['Message'])
       return result
@@ -388,8 +362,6 @@ Queue %(nJobs)s
   def getJobStatus(self, jobIDList):
     """ Get the status information for the given list of jobs
     """
-    self.__cleanup()
-
     self.log.verbose("Job ID List for status: %s " % jobIDList)
     if isinstance(jobIDList, six.string_types):
       jobIDList = [jobIDList]
@@ -445,42 +417,34 @@ Queue %(nJobs)s
     # same machine
     # workingDirectory = self.ceParameters.get( 'WorkingDirectory', DEFAULT_WORKINGDIRECTORY )
 
+    iwd = os.path.join(self.workingDirectory, pathToResult)
+
+    try:
+      mkDir(iwd)
+    except OSError as e:
+      errorMessage = "Failed to create the pilot output directory"
+      self.log.exception(errorMessage, iwd)
+      return S_ERROR(e.errno, '%s (%s)' % (errorMessage, iwd))
+
     if not self.useLocalSchedd:
-      iwd = None
-
-      # TOREMOVE: once v7r0 will mainly be used, remove the following block that was only useful
-      # when path to output was not deterministic
-      status, stdout_q = commands.getstatusoutput('condor_q %s %s -af SUBMIT_Iwd' % (self.remoteScheddOptions,
-                                                                                     condorID))
-      self.log.verbose('condor_q:', stdout_q)
-      if status == 0 and self.workingDirectory in stdout_q:
-        iwd = stdout_q
-        pathToResult = iwd
-
-      # Use the path extracted from the pilotID
-      if iwd is None:
-        iwd = os.path.join(self.workingDirectory, pathToResult)
-
-      try:
-        mkDir(iwd)
-      except OSError as e:
-        errorMessage = "Failed to create the pilot output directory"
-        self.log.exception(errorMessage, iwd)
-        return S_ERROR(e.errno, '%s (%s)' % (errorMessage, iwd))
-
       cmd = ['condor_transfer_data', '-pool', '%s:9619' % self.ceName, '-name', self.ceName, condorID]
-      result = executeGridCommand(self.proxy, cmd, self.gridEnv)
-      self.log.verbose(result)
+    else:
+      cmd = ['condor_transfer_data', condorID]
 
-      errorMessage = "Failed to get job output from htcondor"
-      if not result['OK']:
-        self.log.error(errorMessage, result['Message'])
-        return result
-      # Even if result is OK, the actual exit code of cmd can still be an error
-      if result['OK'] and result['Value'][0] != 0:
-        varMessage = result['Value'][1].strip()
-        self.log.error(errorMessage, varMessage)
-        return S_ERROR('%s: %s' % (errorMessage, varMessage))
+    result = executeGridCommand(self.proxy, cmd, self.gridEnv)
+    self.log.verbose(result)
+
+    errorMessage = "Failed to get job output from htcondor"
+    if not result['OK']:
+      self.log.error(errorMessage, result['Message'])
+      return result
+    # Even if result is OK, the actual exit code of cmd can still be an error
+    if result['OK'] and result['Value'][0] != 0:
+      outMessage = result['Value'][1].strip()
+      errMessage = result['Value'][2].strip()
+      varMessage = outMessage + ' ' + errMessage
+      self.log.error(errorMessage, varMessage)
+      return S_ERROR('%s: %s' % (errorMessage, varMessage))
 
     output = ''
     error = ''
@@ -489,23 +453,25 @@ Queue %(nJobs)s
     if not resOut['OK']:
       self.log.error("Failed to find output file for condor job", jobID)
       return resOut
-    outputfilename = resOut['Value'][0]
+    outputfilename = resOut['Value']
 
     resErr = findFile(self.workingDirectory, '%s.err' % condorID, pathToResult)
     if not resErr['OK']:
       self.log.error("Failed to find error file for condor job", jobID)
       return resErr
-    errorfilename = resErr['Value'][0]
+    errorfilename = resErr['Value']
 
     try:
       with open(outputfilename) as outputfile:
         output = outputfile.read()
+      os.remove(outputfilename)
     except IOError as e:
       self.log.error("Failed to open outputfile", str(e))
       return S_ERROR("Failed to get pilot output")
     try:
       with open(errorfilename) as errorfile:
         error = errorfile.read()
+      os.remove(errorfilename)
     except IOError as e:
       self.log.error("Failed to open errorfile", str(e))
       return S_ERROR("Failed to get pilot error")
@@ -534,40 +500,3 @@ Queue %(nJobs)s
     cePrefix = "htcondorce://%s/" % self.ceName
     jobReferences = ["%s%s.%s" % (cePrefix, clusterID, i) for i in range(int(numJobs) + 1)]
     return S_OK(jobReferences)
-
-  def __cleanup(self):
-    """ Clean the working directory of old jobs"""
-
-    # FIXME: again some issue with the working directory...
-    # workingDirectory = self.ceParameters.get( 'WorkingDirectory', DEFAULT_WORKINGDIRECTORY )
-
-    if not HTCondorCEComputingElement._cleanupLock.acquire(False):
-      return
-
-    now = datetime.datetime.utcnow()
-    if (now - HTCondorCEComputingElement._lastCleanupTime).total_seconds() < 60:
-      HTCondorCEComputingElement._cleanupLock.release()
-      return
-
-    HTCondorCEComputingElement._lastCleanupTime = now
-
-    self.log.debug("Cleaning working directory: %s" % self.workingDirectory)
-
-    # remove all files older than 120 minutes starting with DIRAC_ Condor will
-    # push files on submission, but it takes at least a few seconds until this
-    # happens so we can't directly unlink after condor_submit
-    status, stdout = commands.getstatusoutput('find -O3 %s -maxdepth 1 -mmin +120 -name "DIRAC_*" -delete ' %
-                                              self.workingDirectory)
-    if status:
-      self.log.error("Failure during HTCondorCE __cleanup", stdout)
-
-    # remove all out/err/log files older than "DaysToKeepLogs" days in the working directory
-    # not running this for each CE so we do global cleanup
-    findPars = dict(workDir=self.workingDirectory, days=self.daysToKeepLogs)
-    # remove all out/err/log files older than "DaysToKeepLogs" days
-    status, stdout = commands.getstatusoutput(
-        r'find %(workDir)s -mtime +%(days)s -type f \( -name "*.out" -o -name "*.err" -o -name "*.log" \) -delete ' %
-        findPars)
-    if status:
-      self.log.error("Failure during HTCondorCE __cleanup", stdout)
-    self._cleanupLock.release()

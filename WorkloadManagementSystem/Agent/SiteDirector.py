@@ -869,12 +869,7 @@ class SiteDirector(AgentModule):
                                                           envVariables=envVariables)
 
     submitResult = ce.submitJob(executable, '', pilotSubmissionChunk)
-    # FIXME: The condor thing only transfers the file with some
-    # delay, so when we unlink here the script is gone
-    # FIXME 2: but at some time we need to clean up the pilot wrapper scripts...
-    if not (self.queueDict[queue]['CEType'] == 'HTCondorCE' or
-            (self.queueDict[queue]['CEType'] == 'Local' and ce.batchSystem == 'Condor')):
-      os.unlink(executable)
+    os.unlink(executable)
     if not submitResult['OK']:
       self.log.error("Failed submission to queue",
                      "Queue %s:\n, %s" % (queue, submitResult['Message']))

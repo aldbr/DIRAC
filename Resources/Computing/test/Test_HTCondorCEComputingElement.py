@@ -59,7 +59,6 @@ class HTCondorCETests(unittest.TestCase):
   @patch(MODNAME + ".commands.getstatusoutput", new=Mock(side_effect=([(0, "\n".join(STATUS_LINES)),
                                                                        (0, "\n".join(HISTORY_LINES)),
                                                                        (0, 0)])))
-  @patch(MODNAME + ".HTCondorCEComputingElement._HTCondorCEComputingElement__cleanup", new=Mock())
   def test_getJobStatus(self):
 
     htce = HTCE.HTCondorCEComputingElement(12345)
