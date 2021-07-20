@@ -119,7 +119,7 @@ def condorIDAndPathToResultFromJobRef(jobRef):
   return jobURL, pathToResult, condorID
 
 
-def findFile(workingDir, fileName, pathToResult=None):
+def findFile(workingDir, fileName, pathToResult):
   """ Find a file in a file system.
 
   :param str workingDir: the name of the directory containing the given file to search for
@@ -128,23 +128,11 @@ def findFile(workingDir, fileName, pathToResult=None):
 
   :return: list of paths leading to the file
   """
-
-  # In the case pathToResult is defined, we just have to check the path exists
-  if pathToResult:
-    path = os.path.join(workingDir, pathToResult, fileName)
-    if os.path.exists(path):
-      # We put the path in a list to be consistent
-      return S_OK([path])
-
-  # In the case pathToResult is not defined or not correct
-  # We have to search for the file in workingDir and can get multiple results
-  res = Subprocess().systemCall("find %s -name '%s'" % (workingDir, fileName), shell=True)
-  if not res['OK']:
-    return res
-  paths = res['Value'][1].splitlines()
-  if not paths:
-    return S_ERROR(errno.ENOENT, "Could not find %s in directory %s" % (fileName, workingDir))
-  return S_OK(paths)
+  path = os.path.join(workingDir, pathToResult, fileName)
+  if os.path.exists(path):
+    # We put the path in a list to be consistent
+    return S_OK(path)
+  return S_ERROR(errno.ENOENT, "Could not find %s" % path)
 
 
 def getCondorLogFile(pilotRef):
@@ -441,20 +429,7 @@ Queue %(nJobs)s
     # workingDirectory = self.ceParameters.get( 'WorkingDirectory', DEFAULT_WORKINGDIRECTORY )
 
     if not self.useLocalSchedd:
-      iwd = None
-
-      # TOREMOVE: once v7r0 will mainly be used, remove the following block that was only useful
-      # when path to output was not deterministic
-      status, stdout_q = commands.getstatusoutput('condor_q %s %s -af SUBMIT_Iwd' % (self.remoteScheddOptions,
-                                                                                     condorID))
-      self.log.verbose('condor_q:', stdout_q)
-      if status == 0 and self.workingDirectory in stdout_q:
-        iwd = stdout_q
-        pathToResult = iwd
-
-      # Use the path extracted from the pilotID
-      if iwd is None:
-        iwd = os.path.join(self.workingDirectory, pathToResult)
+      iwd = os.path.join(self.workingDirectory, pathToResult)
 
       try:
         mkDir(iwd)
@@ -484,13 +459,13 @@ Queue %(nJobs)s
     if not resOut['OK']:
       self.log.error("Failed to find output file for condor job", jobID)
       return resOut
-    outputfilename = resOut['Value'][0]
+    outputfilename = resOut['Value']
 
     resErr = findFile(self.workingDirectory, '%s.err' % condorID, pathToResult)
     if not resErr['OK']:
       self.log.error("Failed to find error file for condor job", jobID)
       return resErr
-    errorfilename = resErr['Value'][0]
+    errorfilename = resErr['Value']
 
     try:
       with open(outputfilename) as outputfile:
