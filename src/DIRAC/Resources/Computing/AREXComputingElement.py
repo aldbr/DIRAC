@@ -23,6 +23,7 @@ import sys
 import requests
 import json
 import ldap3
+
 # from urllib.parse import urljoin
 
 from DIRAC import S_OK, S_ERROR, gConfig
@@ -269,7 +270,7 @@ class AREXComputingElement(ARCComputingElement):
             self.log.warning("Pilot already in API format", "%s" % pilot)
             return pilot
         pilotAPI = "gsiftp://" + self.ceHost + "/" + pilot
-        # Uncomment if Federico really really wants this
+        # Uncomment if Federico really really wants this and comment the above line
         # base_url = "gsiftp://" + self.ceHost
         # pilotAPI = urljoin(base_url, pilot)
         return pilotAPI
