@@ -22,6 +22,8 @@ import sys
 
 import requests
 import json
+import ldap3
+# from urllib.parse import urljoin
 
 from DIRAC import S_OK, S_ERROR, gConfig
 from DIRAC.ConfigurationSystem.Client.Helpers.Resources import getCESiteMapping
@@ -35,7 +37,6 @@ from DIRAC.Core.Security.X509Chain import X509Chain  # pylint: disable=import-er
 from DIRAC.Core.Security import Locations
 from DIRAC.Core.Utilities.ReturnValues import returnValueOrRaise
 from DIRAC.ConfigurationSystem.Client.Helpers.Path import cfgPath
-import ldap3
 
 CE_NAME = "AREX"
 MANDATORY_PARAMETERS = ["Queue"]  # Mandatory for ARC CEs
@@ -268,6 +269,9 @@ class AREXComputingElement(ARCComputingElement):
             self.log.warning("Pilot already in API format", "%s" % pilot)
             return pilot
         pilotAPI = "gsiftp://" + self.ceHost + "/" + pilot
+        # Uncomment if Federico really really wants this
+        # base_url = "gsiftp://" + self.ceHost
+        # pilotAPI = urljoin(base_url, pilot)
         return pilotAPI
 
     def _pilot_toREST(self, pilot):
@@ -275,9 +279,8 @@ class AREXComputingElement(ARCComputingElement):
         if "://" in pilot:
             pilotREST = pilot.split("jobs/")[-1]
             return pilotREST
-        else:
-            self.log.warning("Pilot already in REST format?", "%s" % pilot)
-            return pilot
+        self.log.warning("Pilot already in REST format?", "%s" % pilot)
+        return pilot
 
     def _delegation(self, jobID):
         """Here we handle the delegations (Nordugrid language) = Proxy (Dirac language)
