@@ -334,7 +334,7 @@ class AREXComputingElement(ARCComputingElement):
             r = self.s.post(query, data=json.dumps(jj), headers=self.headers, timeout=self.arcRESTTimeout)
             dID = ""
             if r.ok:  # Check if the job has a delegation
-                p = json.loads(r.text.replace("\n", ""))
+                p = json.loads(r.text)
                 if "delegation_id" in p["job"]:
                     dID = p["job"]["delegation_id"][0]
             return dID
@@ -385,7 +385,7 @@ class AREXComputingElement(ARCComputingElement):
             r = self.s.post(query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
             if r.ok:
                 # Job successfully submitted. Should I just test for == 201?
-                pilotJobReference = self._pilot_toAPI(json.loads(r.text.replace("\n", ""))["job"]["id"])
+                pilotJobReference = self._pilot_toAPI(json.loads(r.text)["job"]["id"])
                 batchIDList.append(pilotJobReference)
                 stampDict[pilotJobReference] = diracStamp
                 self.log.debug("Successfully submitted job", "%s to CE %s" % (pilotJobReference, self.ceHost))
@@ -393,7 +393,7 @@ class AREXComputingElement(ARCComputingElement):
                 self.log.warn(
                     "Failed to submit job",
                     "to CE %s with error - %s - and message : %s"
-                    % (self.ceHost, r.status_code, json.loads(r.text.replace("\n", ""))),
+                    % (self.ceHost, r.status_code, json.loads(r.text)),
                 )
                 self.log.debug("DIRAC stamp and ARC job", "%s : %s" % (diracStamp, xrslString))
                 break  # Boo hoo *sniff*
@@ -431,9 +431,9 @@ class AREXComputingElement(ARCComputingElement):
         r = self.s.post(query, data=jj, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout)
         if r.ok:
             # Job successfully submitted
-            self.log.debug("Successfully deleted jobs %s " % (json.loads(r.text.replace("\n", ""))))
+            self.log.debug("Successfully deleted jobs %s " % (json.loads(r.text)))
         else:
-            return S_ERROR("Failed to kill all these jobs: %s" % json.loads(r.text.replace("\n", "")))
+            return S_ERROR("Failed to kill all these jobs: %s" % json.loads(r.text))
 
         return S_OK()
 
@@ -472,7 +472,7 @@ class AREXComputingElement(ARCComputingElement):
             res = S_ERROR("Unknown failure for CE %s. Is the CE down?" % self.ceHost)
             return res
 
-        p = json.loads(r.text.replace("\n", ""))
+        p = json.loads(r.text)
 
         # Look only in the relevant section out of the headache
         info = p["Domains"]["AdminDomain"]["Services"]["ComputingService"]["ComputingShare"]
@@ -568,7 +568,7 @@ class AREXComputingElement(ARCComputingElement):
             self.log.info("Failed getting the status of the jobs")
             return S_ERROR("Failed getting the status of the jobs")
 
-        p = json.loads(r.text.replace("\n", ""))
+        p = json.loads(r.text)
         resultDict = {}
         jobsToRenew = []
         jobsToCancel = []
