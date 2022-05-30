@@ -330,14 +330,14 @@ class AREXComputingElement(ARCComputingElement):
                     dID = ""
             return dID
         else:  # Retrieve delegation for existing job
-            jj = {"job": [{"id": jobID}]}  # job in ARC REST json format
+            jobsJson = {"job": [{"id": jobID}]}  # job in ARC REST json format
             command = "jobs"
             params = {"action": "delegations"}
             query = self.base_url + command
-            r = self.s.post(query, data=json.dumps(jj), headers=self.headers, timeout=self.arcRESTTimeout)
+            r = self.s.post(query, data=json.dumps(jobsJson), headers=self.headers, timeout=self.arcRESTTimeout)
             dID = ""
             if r.ok:  # Check if the job has a delegation
-                p = json.loads(r.text)
+                p = r.json()
                 if "delegation_id" in p["job"]:
                     dID = p["job"]["delegation_id"][0]
             return dID
@@ -389,7 +389,7 @@ class AREXComputingElement(ARCComputingElement):
             r = self.s.post(query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
             if r.status_code == 201:
                 # Job successfully submitted. 201 is the code for successful submission
-                pilotJobReference = self._pilot_toAPI(json.loads(r.text)["job"]["id"])
+                pilotJobReference = self._pilot_toAPI(r.json()["job"]["id"])
                 batchIDList.append(pilotJobReference)
                 stampDict[pilotJobReference] = diracStamp
                 self.log.debug("Successfully submitted job", "%s to CE %s" % (pilotJobReference, self.ceHost))
@@ -397,7 +397,7 @@ class AREXComputingElement(ARCComputingElement):
                 self.log.warn(
                     "Failed to submit job",
                     "to CE %s with error - %s - and messages : %s and %s"
-                    % (self.ceHost, r.status_code, r.reason, json.loads(r.text)),
+                    % (self.ceHost, r.status_code, r.reason, r.json()),
                 )
                 self.log.debug("DIRAC stamp and ARC job", "%s : %s" % (diracStamp, xrslString))
                 break  # Boo hoo *sniff*
@@ -426,18 +426,18 @@ class AREXComputingElement(ARCComputingElement):
         jList = [self._pilot_toREST(job) for job in jobIDList]
 
         # List of jobs in json format for the REST query
-        jj = {"job": [{"id": job} for job in jList]}
+        jobsJson = {"job": [{"id": job} for job in jList]}
 
         command = "jobs"
         params = {"action": "kill"}
         query = self.base_url + command
         # Killing jobs should be fast - bulk timeout of 10 seconds * basicTimeoutValue should be okay(?)
-        r = self.s.post(query, data=jj, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout)
+        r = self.s.post(query, data=jobsJson, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout)
         if r.ok:
             # Job successfully submitted
-            self.log.debug("Successfully deleted jobs %s " % (json.loads(r.text)))
+            self.log.debug("Successfully deleted jobs %s " % (r.json()))
         else:
-            return S_ERROR("Failed to kill all these jobs: %s" % json.loads(r.text))
+            return S_ERROR("Failed to kill all these jobs: %s" % r.json())
 
         return S_OK()
 
@@ -476,7 +476,7 @@ class AREXComputingElement(ARCComputingElement):
             res = S_ERROR("Unknown failure for CE %s. Is the CE down?" % self.ceHost)
             return res
 
-        p = json.loads(r.text)
+        p = r.json()
 
         # Look only in the relevant section out of the headache
         info = p["Domains"]["AdminDomain"]["Services"]["ComputingService"]["ComputingShare"]
@@ -561,24 +561,23 @@ class AREXComputingElement(ARCComputingElement):
         self.log.debug("Getting status of jobs : %s" % jobList)
 
         # List of jobs in json format for the REST query
-        jj = {"job": [{"id": self._pilot_toREST(job)} for job in jobList]}
+        jobsJson = {"job": [{"id": self._pilot_toREST(job)} for job in jobList]}
 
         command = "jobs"
         params = {"action": "status"}
         query = self.base_url + command
         # Assume it takes 1 second per pilot and timeout accordingly?
         r = self.s.post(
-            query, data=jj, headers=self.headers, params=params, timeout=float(len(jobList) * self.arcRESTTimeout)
+            query, data=jobsJson, headers=self.headers, params=params, timeout=float(len(jobList) * self.arcRESTTimeout)
         )
         if not r.ok:
             self.log.info("Failed getting the status of the jobs")
             return S_ERROR("Failed getting the status of the jobs")
 
-        p = json.loads(r.text)
         resultDict = {}
         jobsToRenew = []
         jobsToCancel = []
-        for job in p["job"]:
+        for job in r.json()["job"]:
             jobID = self._pilot_toAPI(job["id"])
             # ARC REST interface returns hyperbole
             arcState = job["state"].capitalize()
