@@ -295,6 +295,8 @@ class AREXComputingElement(ARCComputingElement):
             More info at
             https://www.nordugrid.org/arc/arc6/users/xrsl.html#delegationid
             https://www.nordugrid.org/arc/arc6/tech/rest/rest.html#delegation-functionality
+        Note that this is a two step procedure. First we upload the proxy. Then we sign and put back
+        the certificate that is returned by the first step. This saves the delegation "properly" on the CE.
 
         If the jobID is not empty:
             Query and return the delegation ID of the given job
@@ -316,11 +318,12 @@ class AREXComputingElement(ARCComputingElement):
             dID = ""
             if r.ok:  # Get the delegation and "PUT" it in the CE ...
                 dID = r.headers.get("location", "")
+                data = proxy.generateChainFromRequestString(r.text, lifetime=4*12*3600)["Value"]
                 if len(dID) > 2:
                     dID = dID.split("new/")[-1]
                     command = "delegations/" + dID
                     query = self.base_url + command
-                    r1 = self.s.put(query, data=r.text, headers=self.headers, timeout=self.arcRESTTimeout)
+                    r1 = self.s.put(query, data=data, headers=self.headers, timeout=self.arcRESTTimeout)
                     if not r1.ok:
                         dID = ""
                 else:
@@ -376,6 +379,7 @@ class AREXComputingElement(ARCComputingElement):
             deleText = "(delegationid=%s)" % deleg
         # It is fairly simple to change to bulk submission. Should I do so?
         # https://www.nordugrid.org/arc/arc6/tech/rest/rest.html#job-submission-create-a-new-job
+        # Also : https://bugzilla.nordugrid.org/show_bug.cgi?id=4069
         for _ in range(numberOfJobs):
             # Get the job into the ARC way
             xrslString, diracStamp = self.__writeXRSL(executableFile)
@@ -383,8 +387,8 @@ class AREXComputingElement(ARCComputingElement):
             self.log.debug("XRSL string submitted", "is %s" % xrslString)
             self.log.debug("DIRAC stamp for job", "is %s" % diracStamp)
             r = self.s.post(query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
-            if r.ok:
-                # Job successfully submitted. Should I just test for == 201?
+            if r.status_code == 201:
+                # Job successfully submitted. 201 is the code for successful submission
                 pilotJobReference = self._pilot_toAPI(json.loads(r.text)["job"]["id"])
                 batchIDList.append(pilotJobReference)
                 stampDict[pilotJobReference] = diracStamp
@@ -392,8 +396,8 @@ class AREXComputingElement(ARCComputingElement):
             else:
                 self.log.warn(
                     "Failed to submit job",
-                    "to CE %s with error - %s - and message : %s"
-                    % (self.ceHost, r.status_code, json.loads(r.text)),
+                    "to CE %s with error - %s - and messages : %s and %s"
+                    % (self.ceHost, r.status_code, r.reason, json.loads(r.text)),
                 )
                 self.log.debug("DIRAC stamp and ARC job", "%s : %s" % (diracStamp, xrslString))
                 break  # Boo hoo *sniff*
@@ -491,10 +495,16 @@ class AREXComputingElement(ARCComputingElement):
     def _renewJobs(self, jobList):
         """Written for the REST interface - jobList is already in the REST format
         This function is called only by this class, NOT by the SiteDirector"""
+
+        # Get the new proxy once for all the jobs ...
+        newProxy = X509Chain()
+        res = newProxy.loadProxyFromFile(self.s.cert)
+
+        # Renew the jobs
         for job in jobList:
             # First get the delegation (proxy)
             dID = self._delegation(job)
-            if len(dID) < 2:  # No delegation.
+            if len(dID) < 2:  # No delegation. No renew.
                 continue
 
             # Get the proxy
@@ -502,26 +512,22 @@ class AREXComputingElement(ARCComputingElement):
             params = {"action": "get"}
             query = self.base_url + command
             r = self.s.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
-            proxy = X509Chain.loadChainFromString(r.text)
-            # Keep the following lines of code while waiting to test out the above line
-
-            # # We need to write the proxy out to get its information
-            # tmpProxyFile = "/tmp/arcRestRenew-" + makeGuid()[:8]
-            # with open(tmpProxyFile, 'w') as outFile: outFile.write(r.text)
-            # proxy = getProxyInfo(tmpProxyFile)
-            # os.unlink(tmpProxyFile) # Cleanup
+            proxy = X509Chain()
+            proxy.loadChainFromString(r.text)
 
             # Now test and renew the proxy
-            if not proxy["OK"] or "secondsLeft" not in proxy["Value"]:
-                continue  # Proxy not okay or does not have "secondsLeft"
-            timeLeft = int(proxy["Value"]["secondsLeft"])
+            if not proxy["OK"]:
+                continue
+            timeLeft = proxy.getRemainingSecs()
             if timeLeft < self.proxyTimeLeftBeforeRenewal:
                 self.log.debug("Renewing proxy for job", "%s whose proxy expires at %s" % (job, timeLeft))
                 # Proxy needs to be renewd - try to renew it
                 command = "delegations/" + dID
                 params = {"action": "renew"}
                 query = self.base_url + command
-                r = self.s.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
+                lHeaders = self.headers # Local headers in this case
+                lHeaders["Content-Type"] = "application/x-pem-file"
+                r = self.s.post(query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout)
                 if r.ok:
                     self.log.debug("Proxy successfully renewed", "for job %s" % job)
                 else:
