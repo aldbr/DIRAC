@@ -318,7 +318,7 @@ class AREXComputingElement(ARCComputingElement):
             dID = ""
             if r.ok:  # Get the delegation and "PUT" it in the CE ...
                 dID = r.headers.get("location", "")
-                data = proxy.generateChainFromRequestString(r.text, lifetime=4*12*3600)["Value"]
+                data = proxy.generateChainFromRequestString(r.text, lifetime=4 * 12 * 3600)["Value"]
                 if len(dID) > 2:
                     dID = dID.split("new/")[-1]
                     command = "delegations/" + dID
@@ -525,9 +525,11 @@ class AREXComputingElement(ARCComputingElement):
                 command = "delegations/" + dID
                 params = {"action": "renew"}
                 query = self.base_url + command
-                lHeaders = self.headers # Local headers in this case
+                lHeaders = self.headers  # Local headers in this case
                 lHeaders["Content-Type"] = "application/x-pem-file"
-                r = self.s.post(query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout)
+                r = self.s.post(
+                    query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout
+                )
                 if r.ok:
                     self.log.debug("Proxy successfully renewed", "for job %s" % job)
                 else:
@@ -636,6 +638,7 @@ class AREXComputingElement(ARCComputingElement):
         ##### I am not sure I have understood how DIRAC works here
         ##### But I hope that the previous looks have confirmed that this is how
         ##### the WMSAdministrator expects the results.
+        ##### To be done next
         mycwd = os.getcwd()
         os.makedirs(workingDirectory)
         os.chdir(workingDirectory)  # Retrieve the outputs here
