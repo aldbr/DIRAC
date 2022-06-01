@@ -67,7 +67,6 @@ class AREXComputingElement(ARCComputingElement):
         """Standard constructor."""
         super(AREXComputingElement, self).__init__(ceUniqueID)
 
-        self.ceType = CE_NAME
         self.submittedJobs = 0
         self.mandatoryParameters = MANDATORY_PARAMETERS
         self.pilotProxy = ""
