@@ -39,7 +39,6 @@ from DIRAC.Core.Security import Locations
 from DIRAC.Core.Utilities.ReturnValues import returnValueOrRaise
 from DIRAC.ConfigurationSystem.Client.Helpers.Path import cfgPath
 
-CE_NAME = "AREX"
 MANDATORY_PARAMETERS = ["Queue"]  # Mandatory for ARC CEs
 
 # Note : interiting from ARCComputingElement. See https://github.com/DIRACGrid/DIRAC/pull/5330#discussion_r740907255
@@ -73,7 +72,6 @@ class AREXComputingElement(ARCComputingElement):
         self.mandatoryParameters = MANDATORY_PARAMETERS
         self.pilotProxy = ""
         self.queue = ""
-        self.outputURL = "gsiftp://localhost"
         self.ceHost = self.ceName
 
         result = returnValueOrRaise(getCESiteMapping(self.ceHost))
@@ -85,6 +83,8 @@ class AREXComputingElement(ARCComputingElement):
             self.log.info("REST interface successfully configured", "for %s" % self.ceHost)
         else:
             self.log.info("REST interface not yet properly configured", "for %s" % self.ceHost)
+            self.log.info("Try again in next iteration", "Bye Bye")
+            return S_ERROR("Try try try initialisation again")
 
         # Do these after all other initialisations, in case something barks
         self.xrslExtraString = self.__getXRSLExtraString()
@@ -114,11 +114,12 @@ class AREXComputingElement(ARCComputingElement):
     def initialised(self):
         """Check if the REST interface is available and ready, configuring it if required.
         Hopefully this is executed just once per CE, though it should not harm to run it more often.
-        If all is well the following variables are set, and a few others on which they (especially self.s) depend.
+        If all is well the following variables are set, and a few others on which they (especially self.session)
+        depend.
         self.initialised : Static variable to say if the REST interface is available and ready
-        self.base_url: The basic URL for the REST interface
-        self.s       : The python "requests" module session
-        self.headers : The format of information we prefer : json of course
+        self.base_url : The basic URL for the REST interface
+        self.session  : The python "requests" module session
+        self.headers  : The format of information we prefer : json of course (except during delegations)
         Specification : https://www.nordugrid.org/arc/arc6/tech/rest/rest.html
         """
         if hasattr(self, "s"):
@@ -160,17 +161,15 @@ class AREXComputingElement(ARCComputingElement):
             if len(response) != 1:
                 self.log.warning("Expected one endpoint, got %s. Using the first." % len(response))
             # For some reason the response is of class "bytes"
-            service_url = response[0]["raw_attributes"]["GLUE2EndpointURL"][  # pylint: disable=unsubscriptable-object
-                0
-            ].decode()
+            service_url = response[0]["raw_attributes"]["GLUE2EndpointURL"][0].decode()
 
         # We now have a pointer (service_url) to the REST interface for this CE
         restVersion = "1.0"  # Will be this value for the forseeable future.
         self.base_url = service_url + "/rest/" + restVersion + "/"
 
         # Set up the request framework
-        self.s = requests.Session()
-        self.s.verify = Locations.getCAsLocation()
+        self.session = requests.Session()
+        self.session.verify = Locations.getCAsLocation()
         self.headers = {"accept": "application/json", "Content-Type": "application/json"}
 
         return True
@@ -205,7 +204,7 @@ class AREXComputingElement(ARCComputingElement):
             self.log.debug("Found %s : %s" % (xtraVariable, xrslExtraString))
         if xrslExtraString:
             self.log.always("%s : %s" % (xtraVariable, xrslExtraString))
-            self.log.always(" --- to be added to pilots going to CE : %s" % self.ceHost)
+            self.log.always(" --- to be added to pilots going to CE :", self.ceHost)
         return xrslExtraString
 
     #############################################################################
@@ -267,8 +266,12 @@ class AREXComputingElement(ARCComputingElement):
     def _pilot_toAPI(self, pilot):
         # Add CE and protocol information to pilot ID
         if "://" in pilot:
-            self.log.warning("Pilot already in API format", "%s" % pilot)
+            self.log.warning("Pilot already in API format", pilot)
             return pilot
+        # Note - the "gsiftp" here is fairly irrelevant to the code as far as interaction with
+        # the CE goes. It is used only for historical purposes and probably for display, where the
+        # shifter would like the pilot URL to use offline to query the CE. Such a shifter presumably
+        # knows exactly what they are doing.
         pilotAPI = "gsiftp://" + self.ceHost + "/" + pilot
         # Uncomment if Federico really really wants this and comment the above line
         # base_url = "gsiftp://" + self.ceHost
@@ -280,7 +283,7 @@ class AREXComputingElement(ARCComputingElement):
         if "://" in pilot:
             pilotREST = pilot.split("jobs/")[-1]
             return pilotREST
-        self.log.warning("Pilot already in REST format?", "%s" % pilot)
+        self.log.warning("Pilot already in REST format?", pilot)
         return pilot
 
     def _delegation(self, jobID):
@@ -311,8 +314,8 @@ class AREXComputingElement(ARCComputingElement):
             params = {"action": "new"}
             query = self.base_url + command
             proxy = X509Chain()
-            res = proxy.loadProxyFromFile(self.s.cert)
-            r = self.s.post(
+            res = proxy.loadProxyFromFile(self.session.cert)
+            r = self.session.post(
                 query, data=proxy.dumpAllToString(), headers=self.headers, params=params, timeout=self.arcRESTTimeout
             )
             dID = ""
@@ -323,7 +326,7 @@ class AREXComputingElement(ARCComputingElement):
                     dID = dID.split("new/")[-1]
                     command = "delegations/" + dID
                     query = self.base_url + command
-                    r1 = self.s.put(query, data=data, headers=self.headers, timeout=self.arcRESTTimeout)
+                    r1 = self.session.put(query, data=data, headers=self.headers, timeout=self.arcRESTTimeout)
                     if not r1.ok:
                         dID = ""
                 else:
@@ -334,7 +337,7 @@ class AREXComputingElement(ARCComputingElement):
             command = "jobs"
             params = {"action": "delegations"}
             query = self.base_url + command
-            r = self.s.post(query, data=json.dumps(jobsJson), headers=self.headers, timeout=self.arcRESTTimeout)
+            r = self.session.post(query, data=json.dumps(jobsJson), headers=self.headers, timeout=self.arcRESTTimeout)
             dID = ""
             if r.ok:  # Check if the job has a delegation
                 p = r.json()
@@ -357,7 +360,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.s.cert = Locations.getProxyLocation()
+        self.session.cert = Locations.getProxyLocation()
 
         self.log.verbose("Executable file path: %s" % executableFile)
         if not os.access(executableFile, 5):
@@ -386,7 +389,9 @@ class AREXComputingElement(ARCComputingElement):
             xrslString = xrslString + deleText  ### Needs to be tested.
             self.log.debug("XRSL string submitted", "is %s" % xrslString)
             self.log.debug("DIRAC stamp for job", "is %s" % diracStamp)
-            r = self.s.post(query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
+            r = self.session.post(
+                query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout
+            )
             if r.status_code == 201:
                 # Job successfully submitted. 201 is the code for successful submission
                 pilotJobReference = self._pilot_toAPI(r.json()["job"]["id"])
@@ -420,7 +425,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.s.cert = Locations.getProxyLocation()
+        self.session.cert = Locations.getProxyLocation()
 
         self.log.debug("Killing jobs", ",".join(jobIDList))
         jList = [self._pilot_toREST(job) for job in jobIDList]
@@ -432,7 +437,9 @@ class AREXComputingElement(ARCComputingElement):
         params = {"action": "kill"}
         query = self.base_url + command
         # Killing jobs should be fast - bulk timeout of 10 seconds * basicTimeoutValue should be okay(?)
-        r = self.s.post(query, data=jobsJson, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout)
+        r = self.session.post(
+            query, data=jobsJson, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout
+        )
         if r.ok:
             # Job successfully submitted
             self.log.debug("Successfully deleted jobs %s " % (r.json()))
@@ -459,7 +466,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.s.cert = Locations.getProxyLocation()
+        self.session.cert = Locations.getProxyLocation()
 
         # Try to find out which VO we are running for. Essential now for REST interface.
         res = getVOfromProxyGroup()
@@ -470,7 +477,7 @@ class AREXComputingElement(ARCComputingElement):
         command = "info"
         params = {"schema": "glue2"}
         query = self.base_url + command
-        r = self.s.get(query, headers=self.headers, params=params, timeout=5.0 * self.arcRESTTimeout)
+        r = self.session.get(query, headers=self.headers, params=params, timeout=5.0 * self.arcRESTTimeout)
 
         if not r.ok:
             res = S_ERROR("Unknown failure for CE %s. Is the CE down?" % self.ceHost)
@@ -498,7 +505,7 @@ class AREXComputingElement(ARCComputingElement):
 
         # Get the new proxy once for all the jobs ...
         newProxy = X509Chain()
-        res = newProxy.loadProxyFromFile(self.s.cert)
+        res = newProxy.loadProxyFromFile(self.session.cert)
 
         # Renew the jobs
         for job in jobList:
@@ -511,7 +518,7 @@ class AREXComputingElement(ARCComputingElement):
             command = "delegations/" + dID
             params = {"action": "get"}
             query = self.base_url + command
-            r = self.s.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
+            r = self.session.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
             proxy = X509Chain()
             proxy.loadChainFromString(r.text)
 
@@ -527,7 +534,7 @@ class AREXComputingElement(ARCComputingElement):
                 query = self.base_url + command
                 lHeaders = self.headers  # Local headers in this case
                 lHeaders["Content-Type"] = "application/x-pem-file"
-                r = self.s.post(
+                r = self.session.post(
                     query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout
                 )
                 if r.ok:
@@ -548,7 +555,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.s.cert = Locations.getProxyLocation()
+        self.session.cert = Locations.getProxyLocation()
 
         jobTmpList = list(jobIDList)
         if isinstance(jobIDList, six.string_types):
@@ -569,7 +576,7 @@ class AREXComputingElement(ARCComputingElement):
         params = {"action": "status"}
         query = self.base_url + command
         # Assume it takes 1 second per pilot and timeout accordingly?
-        r = self.s.post(
+        r = self.session.post(
             query, data=jobsJson, headers=self.headers, params=params, timeout=float(len(jobList) * self.arcRESTTimeout)
         )
         if not r.ok:
@@ -615,7 +622,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.s.cert = Locations.getProxyLocation()
+        self.session.cert = Locations.getProxyLocation()
 
         if ":::" in jobID:
             pilotRef, stamp = jobID.split(":::")
@@ -646,13 +653,13 @@ class AREXComputingElement(ARCComputingElement):
         job = self._pilot_toREST(pilotRef)
         query = self.base_url + command + job + "/session/ " + stamp + ".out"
         # Give the CE 10 seconds to return the log. Is this enough?
-        r = self.s.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
+        r = self.session.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
         if not r.ok:
             self.log.error("Error downloading stdout", "for %s: %s" % (job, r.text))
             return S_ERROR("Failed to retrieve at least some output for %s" % jobID)
         output = r.text
         query = self.base_url + command + job + "/session/ " + stamp + ".err"
-        r = self.s.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
+        r = self.session.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
         if not r.ok:
             self.log.error("Error downloading stderr", "for %s: %s" % (job, r.text))
             return S_ERROR("Failed to retrieve at least some output for %s" % jobID)
