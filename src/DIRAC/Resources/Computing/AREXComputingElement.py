@@ -97,7 +97,8 @@ class AREXComputingElement(ARCComputingElement):
         defaultOption = cfgPath("Resources", "Computing" "CEDefaults", variable)
         result = self._getFromCfgSvc(firstOption, secondOption, defaultOption)
         if result["OK"]:
-            self.proxyTimeLeftBeforeRenewal = result["Value"]
+            if result["Value"] != None:  # Avoid setting to None
+                self.proxyTimeLeftBeforeRenewal = result["Value"]
 
         self.arcRESTTimeout = 1.0
         variable = "ARCRESTTimeout"
@@ -106,7 +107,8 @@ class AREXComputingElement(ARCComputingElement):
         defaultOption = cfgPath("Resources", "Computing" "CEDefaults", variable)
         result = self._getFromCfgSvc(firstOption, secondOption, defaultOption)
         if result["OK"]:
-            self.arcRESTTimeout = result["Value"]
+            if result["Value"] != None:  # Avoid setting to None
+                self.arcRESTTimeout = result["Value"]
 
     #############################################################################
     @property
@@ -140,8 +142,10 @@ class AREXComputingElement(ARCComputingElement):
         # Try getting service_url from the CS
         ceString = cfgPath("Resources", "Sites", self.grid, self.site, "CEs", self.ceHost, "RESTEndpoint")
         result = self._getFromCfgSvc(ceString)
+        service_url = ""
         if result["OK"]:
-            service_url = result["Value"]  # All well
+            if service_url != None:  # Avoid setting to None
+                service_url = result["Value"]  # All well. It returns None if there is nothing in the endpoint.
         if len(service_url) < 5:  # There is no endpoint in the CS. Discover it.
             # The following command should expand to for example
             # ldapsearch -x -LLL -h grendel.hec.lancs.ac.uk:2135 -b 'o=glue' GLUE2EndpointInterfaceName=org.nordugrid.arcrest GLUE2EndpointURL | grep GLUE2EndpointURL | awk -F ": " '{print $2}'
@@ -203,7 +207,13 @@ class AREXComputingElement(ARCComputingElement):
             self.log.debug("Found %s : %s" % (xtraVariable, xrslExtraString))
         if xrslExtraString:
             self.log.always("%s : %s" % (xtraVariable, xrslExtraString))
+<<<<<<< HEAD
+            self.log.always(" --- to be added to pilots going to CE : %s" % self.ceHost)
+        if xrslExtraString == None:
+            xrslExtraString = ""
+=======
             self.log.always(" --- to be added to pilots going to CE :", self.ceHost)
+>>>>>>> 71e1b2bd19e37f0aef0dc7d8ad66270163f2aae3
         return xrslExtraString
 
     #############################################################################
