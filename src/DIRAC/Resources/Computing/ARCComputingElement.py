@@ -114,7 +114,7 @@ class ARCComputingElement(ComputingElement):
         result = getCESiteMapping(self.ceHost)
         if not result["OK"] or not result["Value"]:
             self.log.error("Unknown CE ...")
-            return
+            return xrslExtraString
         self.site = result["Value"][self.ceHost]
         # Now we know the site. Get the grid
         grid = self.site.split(".")[0]
