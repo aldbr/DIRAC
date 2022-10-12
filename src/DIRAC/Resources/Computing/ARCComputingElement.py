@@ -79,7 +79,7 @@ class ARCComputingElement(ComputingElement):
 
     #############################################################################
 
-    def __getARCJob(self, jobID):
+    def _getARCJob(self, jobID):
         """Create an ARC Job with all the needed / possible parameters defined.
         By the time we come here, the environment variable X509_USER_PROXY should already be set
         """
@@ -114,7 +114,7 @@ class ARCComputingElement(ComputingElement):
         result = getCESiteMapping(self.ceHost)
         if not result["OK"] or not result["Value"]:
             self.log.error("Unknown CE ...")
-            return
+            return xrslExtraString
         self.site = result["Value"][self.ceHost]
         # Now we know the site. Get the grid
         grid = self.site.split(".")[0]
@@ -156,7 +156,7 @@ class ARCComputingElement(ComputingElement):
         ComputingElement._addCEConfigDefaults(self)
 
     #############################################################################
-    def __writeXRSL(self, executableFile):
+    def _writeXRSL(self, executableFile):
         """Create the JDL for submission"""
         diracStamp = makeGuid()[:8]
         # Evaluate the number of processors to allocate
@@ -228,7 +228,7 @@ class ARCComputingElement(ComputingElement):
             # The basic job description
             jobdescs = arc.JobDescriptionList()
             # Get the job into the ARC way
-            xrslString, diracStamp = self.__writeXRSL(executableFile)
+            xrslString, diracStamp = self._writeXRSL(executableFile)
             self.log.debug("XRSL string submitted : %s" % xrslString)
             self.log.debug("DIRAC stamp for job : %s" % diracStamp)
             # The arc bindings don't accept unicode objects in Python 2 so xrslString must be explicitly cast
@@ -248,29 +248,7 @@ class ARCComputingElement(ComputingElement):
                 stampDict[pilotJobReference] = diracStamp
                 self.log.debug("Successfully submitted job %s to CE %s" % (pilotJobReference, self.ceHost))
             else:
-                message = "Failed to submit job because "
-                if result.isSet(arc.SubmissionStatus.NOT_IMPLEMENTED):  # pylint: disable=no-member
-                    self.log.warn("%s feature not implemented on CE? (weird I know - complain to site admins" % message)
-                if result.isSet(arc.SubmissionStatus.NO_SERVICES):  # pylint: disable=no-member
-                    self.log.warn("%s no services are running on CE? (open GGUS ticket to site admins" % message)
-                if result.isSet(arc.SubmissionStatus.ENDPOINT_NOT_QUERIED):  # pylint: disable=no-member
-                    self.log.warn("%s endpoint was not even queried. (network ..?)" % message)
-                if result.isSet(arc.SubmissionStatus.BROKER_PLUGIN_NOT_LOADED):  # pylint: disable=no-member
-                    self.log.warn("%s BROKER_PLUGIN_NOT_LOADED : ARC library installation problem?" % message)
-                if result.isSet(arc.SubmissionStatus.DESCRIPTION_NOT_SUBMITTED):  # pylint: disable=no-member
-                    self.log.warn(
-                        "%s Job not submitted - incorrect job description? (missing field in XRSL string?)" % message
-                    )
-                if result.isSet(arc.SubmissionStatus.SUBMITTER_PLUGIN_NOT_LOADED):  # pylint: disable=no-member
-                    self.log.warn("%s SUBMITTER_PLUGIN_NOT_LOADED : ARC library installation problem?" % message)
-                if result.isSet(arc.SubmissionStatus.AUTHENTICATION_ERROR):  # pylint: disable=no-member
-                    self.log.warn(
-                        "%s authentication error - screwed up / expired proxy? Renew / upload pilot proxy on machine?"
-                        % message
-                    )
-                if result.isSet(arc.SubmissionStatus.ERROR_FROM_ENDPOINT):  # pylint: disable=no-member
-                    self.log.warn("%s some error from the CE - possibly CE problems?" % message)
-                self.log.warn("%s ... maybe above messages will give a hint." % message)
+                self._analyzeSubmissionError(result)
                 break  # Boo hoo *sniff*
 
         if batchIDList:
@@ -279,6 +257,32 @@ class ARCComputingElement(ComputingElement):
         else:
             result = S_ERROR("No pilot references obtained from the ARC job submission")
         return result
+
+    def _analyzeSubmissionError(self, result):
+        """Provide further information about the submission error
+
+        :param arc.SubmissionStatus result: submission error
+        """
+        message = "Failed to submit job because "
+        if result.isSet(arc.SubmissionStatus.NOT_IMPLEMENTED):  # pylint: disable=no-member
+            self.log.warn("%s feature not implemented on CE? (weird I know - complain to site admins" % message)
+        if result.isSet(arc.SubmissionStatus.NO_SERVICES):  # pylint: disable=no-member
+            self.log.warn("%s no services are running on CE? (open GGUS ticket to site admins" % message)
+        if result.isSet(arc.SubmissionStatus.ENDPOINT_NOT_QUERIED):  # pylint: disable=no-member
+            self.log.warn("%s endpoint was not even queried. (network ..?)" % message)
+        if result.isSet(arc.SubmissionStatus.BROKER_PLUGIN_NOT_LOADED):  # pylint: disable=no-member
+            self.log.warn("%s BROKER_PLUGIN_NOT_LOADED : ARC library installation problem?" % message)
+        if result.isSet(arc.SubmissionStatus.DESCRIPTION_NOT_SUBMITTED):  # pylint: disable=no-member
+            self.log.warn("%s Job not submitted - incorrect job description? (missing field in XRSL string?)" % message)
+        if result.isSet(arc.SubmissionStatus.SUBMITTER_PLUGIN_NOT_LOADED):  # pylint: disable=no-member
+            self.log.warn("%s SUBMITTER_PLUGIN_NOT_LOADED : ARC library installation problem?" % message)
+        if result.isSet(arc.SubmissionStatus.AUTHENTICATION_ERROR):  # pylint: disable=no-member
+            self.log.warn(
+                "%s authentication error - screwed up / expired proxy? Renew / upload pilot proxy on machine?" % message
+            )
+        if result.isSet(arc.SubmissionStatus.ERROR_FROM_ENDPOINT):  # pylint: disable=no-member
+            self.log.warn("%s some error from the CE - possibly CE problems?" % message)
+        self.log.warn("%s ... maybe above messages will give a hint." % message)
 
     #############################################################################
     def killJob(self, jobIDList):
@@ -297,7 +301,7 @@ class ARCComputingElement(ComputingElement):
         self.log.debug("Killing jobs %s" % jobIDList)
         jobs = []
         for jobID in jobList:
-            jobs.append(self.__getARCJob(jobID))
+            jobs.append(self._getARCJob(jobID))
 
         # JobSupervisor is able to aggregate jobs to perform bulk operations and thus minimizes the communication overhead
         # We still need to create chunks to avoid timeout in the case there are too many jobs to supervise
@@ -403,7 +407,7 @@ class ARCComputingElement(ComputingElement):
 
         jobs = []
         for jobID in jobList:
-            jobs.append(self.__getARCJob(jobID))
+            jobs.append(self._getARCJob(jobID))
 
         # JobSupervisor is able to aggregate jobs to perform bulk operations and thus minimizes the communication overhead
         # We still need to create chunks to avoid timeout in the case there are too many jobs to supervise
@@ -483,7 +487,7 @@ class ARCComputingElement(ComputingElement):
         if not stamp:
             return S_ERROR("Pilot stamp not defined for %s" % pilotRef)
 
-        job = self.__getARCJob(pilotRef)
+        job = self._getARCJob(pilotRef)
 
         arcID = os.path.basename(pilotRef)
         self.log.debug("Retrieving pilot logs for %s" % pilotRef)
