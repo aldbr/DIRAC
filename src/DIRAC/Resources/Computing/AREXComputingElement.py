@@ -39,6 +39,7 @@ from DIRAC.Core.Security import Locations
 from DIRAC.Core.Utilities.ReturnValues import returnValueOrRaise
 from DIRAC.ConfigurationSystem.Client.Helpers.Path import cfgPath
 
+CE_NAME = "AREX"
 MANDATORY_PARAMETERS = ["Queue"]  # Mandatory for ARC CEs
 
 # Note : interiting from ARCComputingElement. See https://github.com/DIRACGrid/DIRAC/pull/5330#discussion_r740907255
@@ -66,86 +67,98 @@ class AREXComputingElement(ARCComputingElement):
     def __init__(self, ceUniqueID):
         """Standard constructor."""
         super(AREXComputingElement, self).__init__(ceUniqueID)
-
+        self.ceType = CE_NAME
         self.submittedJobs = 0
         self.mandatoryParameters = MANDATORY_PARAMETERS
         self.pilotProxy = ""
         self.queue = ""
+        self.outputURL = "gsiftp://localhost"
         self.ceHost = self.ceName
 
         result = returnValueOrRaise(getCESiteMapping(self.ceHost))
         self.site = result[self.ceHost]
         self.grid = self.site.split(".")[0]
 
-        # For the REST interface
-        if self.initialised:  # a bunch of the local variables are set up here.
-            self.log.info("REST interface successfully configured", "for %s" % self.ceHost)
-        else:
-            self.log.info("REST interface not yet properly configured", "for %s" % self.ceHost)
-            self.log.info("Try again in next iteration", "Bye Bye")
-            return S_ERROR("Try try try initialisation again")
-
-        # Do these after all other initialisations, in case something barks
-        self.xrslExtraString = self.__getXRSLExtraString()
-        self.xrslMPExtraString = self.__getXRSLExtraString(multiprocessor=True)
-
-        # Get from the CS the time left (should be in seconds) for proxy before renewal
-        self.proxyTimeLeftBeforeRenewal = 10000  # 2 hours, 46 minutes and 40 seconds
-        variable = "proxyTimeLeftBeforeRenewal"
-        firstOption = cfgPath("Resources", "Sites", self.grid, self.site, "CEs", self.ceHost, variable)
-        secondOption = cfgPath("Resources", "Sites", self.grid, self.site, variable)
-        defaultOption = cfgPath("Resources", "Computing" "CEDefaults", variable)
-        result = self._getFromCfgSvc(firstOption, secondOption, defaultOption)
-        if result["OK"]:
-            if result["Value"] != None:  # Avoid setting to None
-                self.proxyTimeLeftBeforeRenewal = result["Value"]
-
-        self.arcRESTTimeout = 1.0
-        variable = "ARCRESTTimeout"
-        firstOption = cfgPath("Resources", "Sites", self.grid, self.site, "CEs", self.ceHost, variable)
-        secondOption = cfgPath("Resources", "Sites", self.grid, self.site, variable)
-        defaultOption = cfgPath("Resources", "Computing" "CEDefaults", variable)
-        result = self._getFromCfgSvc(firstOption, secondOption, defaultOption)
-        if result["OK"]:
-            if result["Value"] != None:  # Avoid setting to None
-                self.arcRESTTimeout = result["Value"]
-
     #############################################################################
     @property
     def initialised(self):
         """Check if the REST interface is available and ready, configuring it if required.
         Hopefully this is executed just once per CE, though it should not harm to run it more often.
-        If all is well the following variables are set, and a few others on which they (especially self.session)
-        depend.
+        If all is well the following variables are set, and a few others on which they (especially self.s) depend.
         self.initialised : Static variable to say if the REST interface is available and ready
-        self.base_url : The basic URL for the REST interface
-        self.session  : The python "requests" module session
-        self.headers  : The format of information we prefer : json of course (except during delegations)
+        self.base_url: The basic URL for the REST interface
+        self.s       : The python "requests" module session
+        self.headers : The format of information we prefer : json of course
         Specification : https://www.nordugrid.org/arc/arc6/tech/rest/rest.html
+
+        The following needed variables are obtained from the CS. If not available, some hopefully
+        sensible defaults are set.
+        "RESTEndpoint"      - CE is Queried if not available in CS
+               - The endpoint we talk to
+        "XRSLExtraString" - Default = ""
+               - Any CE specific string with additional parameters
+        "XRSLMPExtraString" - Default = ""
+               - Any CE specific string with additional parameters for MP jobs
+        "ARCRESTTimeout"    - DEfault = 1.0 (seconds)
+               - Timeout for the rest query
+        "proxyTimeLeftBeforeRenewal" - Default = 10000 (seconds)
+               - As the name says
+
+        Note : This is not run from __init__ as the design of DIRAC means that ceParameters is
+        as yet only filled with CEDefaults at the time this class is initialised for the given CE
         """
         if hasattr(self, "s"):
             # Initialisation has already been successfully ran
             return True
         self.log.debug("Testing if the REST interface is available", "for %s" % self.ceHost)
 
+        print("-------------------------------->>>>>>>>>>>>>>>>>>>>>>>>>")
+        print(self.ceHost)
+        print(self.ceParameters)
+        print(self.mandatoryParameters)
+        print("XRSLExtraString : ", self.ceParameters.get('XRSLExtraString', ""))
+        print("-------------------------------->>>>>>>>>>>>>>>>>>>>>>>>>")
+
+        # First get the proxy ready
         result = self._prepareProxy()
         if not result["OK"]:  # Probably everything is going to fail?
             self.log.info("No proxy found -  Probably just no jobs to run for this CE?")
             self.log.info("Setting REST interface false.")
             return False
 
+        # Set useful variables from the ceParameters
+        variable = "proxyTimeLeftBeforeRenewal"
+        self.proxyTimeLeftBeforeRenewal = 10000  # 2 hours, 46 minutes and 40 seconds
+        if variable in self.ceParameters.keys():
+            self.proxyTimeLeftBeforeRenewal = self.ceParameters[variable]
+        self.log.debug(f"Setting {variable} to {self.proxyTimeLeftBeforeRenewal} for CE", self.ceHost )
+
+        variable = "ARCRESTTimeout"
+        self.arcRESTTimeout = 1.0
+        if variable in self.ceParameters.keys():
+            self.arcRESTTimeout = self.ceParameters[variable]
+        self.log.debug(f"Setting {variable} to {self.arcRESTTimeout} for CE", self.ceHost )
+
+        variable = "XRSLExtraString"
+        self.xrslExtraString = ""
+        if variable in self.ceParameters.keys():
+            self.xrslExtraString = self.ceParameters[variable]
+        self.log.debug(f"Setting {variable} to {self.xrslExtraString} for CE", self.ceHost )
+
+        variable = "XRSLMPExtraString"
+        self.xrslMPExtraString = ""
+        if variable in self.ceParameters.keys():
+            self.xrslMPExtraString = self.ceParameters[variable]
+        self.log.debug(f"Setting {variable} to {self.xrslMPExtraString} for CE", self.ceHost )
+
         # Get the REST endpoint (service_url in ARC language) from the CS if available (preferred).
-        # It should be at
-        #   Resources/Sites/<Grid>/<Site>/CEs/<CE>/RESTEndpoint
         # Otherwise query the CE for this value.
 
         # Try getting service_url from the CS
-        ceString = cfgPath("Resources", "Sites", self.grid, self.site, "CEs", self.ceHost, "RESTEndpoint")
-        result = self._getFromCfgSvc(ceString)
+        variable = "RESTEndpoint"
         service_url = ""
-        if result["OK"]:
-            if service_url != None:  # Avoid setting to None
-                service_url = result["Value"]  # All well. It returns None if there is nothing in the endpoint.
+        if variable in self.ceParameters.keys():
+            service_url = self.ceParameters[variable]
         if len(service_url) < 5:  # There is no endpoint in the CS. Discover it.
             # The following command should expand to for example
             # ldapsearch -x -LLL -h grendel.hec.lancs.ac.uk:2135 -b 'o=glue' GLUE2EndpointInterfaceName=org.nordugrid.arcrest GLUE2EndpointURL | grep GLUE2EndpointURL | awk -F ": " '{print $2}'
@@ -162,59 +175,22 @@ class AREXComputingElement(ARCComputingElement):
                 self.log.error("Bad status from LDAP search", result)
                 return False
             if len(response) != 1:
-                self.log.warning("Expected one endpoint, got %s. Using the first." % len(response))
+                self.log.warn("Expected one endpoint, got %s. Using the first." % len(response))
             # For some reason the response is of class "bytes"
-            service_url = response[0]["raw_attributes"]["GLUE2EndpointURL"][0].decode()
+            service_url = response[0]["raw_attributes"]["GLUE2EndpointURL"][  # pylint: disable=unsubscriptable-object
+                0
+            ].decode()
 
         # We now have a pointer (service_url) to the REST interface for this CE
         restVersion = "1.0"  # Will be this value for the forseeable future.
         self.base_url = service_url + "/rest/" + restVersion + "/"
 
         # Set up the request framework
-        self.session = requests.Session()
-        self.session.verify = Locations.getCAsLocation()
+        self.s = requests.Session()
+        self.s.verify = Locations.getCAsLocation()
         self.headers = {"accept": "application/json", "Content-Type": "application/json"}
 
         return True
-
-    def __getXRSLExtraString(self, multiprocessor=False):
-        # For the XRSL additional string from configuration - only done at initialisation time
-        # If this string changes, the corresponding (ARC) site directors have to be restarted
-        #
-        # Variable = XRSLExtraString (or XRSLMPExtraString for multi processor mode)
-        # Default value = ''
-        #   If you give a value, I think it should be of the form
-        #          (aaa = "xxx")
-        #   Otherwise the ARC job description parser will have a fit
-        # Locations searched in order :
-        # Top priority    : Resources/Sites/<Grid>/<Site>/CEs/<CE>/XRSLExtraString
-        # Second priority : Resources/Sites/<Grid>/<Site>/XRSLExtraString
-        # Default         : Resources/Computing/CEDefaults/XRSLExtraString
-        #
-        xrslExtraString = ""  # Start with the default value
-        if multiprocessor:
-            xtraVariable = "XRSLMPExtraString"
-        else:
-            xtraVariable = "XRSLExtraString"
-        # The different possibilities that we have agreed upon
-        firstOption = cfgPath("Resources", "Sites", self.grid, self.site, "CEs", self.ceHost, xtraVariable)
-        secondOption = cfgPath("Resources", "Sites", self.grid, self.site, xtraVariable)
-        defaultOption = cfgPath("Resources", "Computing" "CEDefaults", xtraVariable)
-        # Now go about getting the string in the agreed order
-        result = self._getFromCfgSvc(firstOption, secondOption, defaultOption)
-        if result["OK"]:
-            xrslExtraString = result["Value"]
-            self.log.debug("Found %s : %s" % (xtraVariable, xrslExtraString))
-        if xrslExtraString:
-            self.log.always("%s : %s" % (xtraVariable, xrslExtraString))
-<<<<<<< HEAD
-            self.log.always(" --- to be added to pilots going to CE : %s" % self.ceHost)
-        if xrslExtraString == None:
-            xrslExtraString = ""
-=======
-            self.log.always(" --- to be added to pilots going to CE :", self.ceHost)
->>>>>>> 71e1b2bd19e37f0aef0dc7d8ad66270163f2aae3
-        return xrslExtraString
 
     #############################################################################
     def __writeXRSL(self, executableFile):
@@ -256,31 +232,12 @@ class AREXComputingElement(ARCComputingElement):
         return xrsl, diracStamp
 
     #############################################################################
-    def _getFromCfgSvc(self, *options):
-        """Try the possibilities in the given order - firstOption, is always the most preferred value
-        and the last one is the default Option"""
-        if len(options) < 1:
-            return S_ERROR("No paths for CS found")
-        self.log.debug("Trying to get information from the CS")
-        for option in options:
-            if len(option) < 2:
-                continue
-            self.log.debug("Trying to retrieve from CS location : %s" % option)
-            result = gConfig.getValue(option)
-            if result:
-                return S_OK(result)
-        # Likely none of the paths were valid in the CS
-        return S_OK()
 
     def _pilot_toAPI(self, pilot):
         # Add CE and protocol information to pilot ID
         if "://" in pilot:
-            self.log.warning("Pilot already in API format", pilot)
+            self.log.warn("Pilot already in API format", "%s" % pilot)
             return pilot
-        # Note - the "gsiftp" here is fairly irrelevant to the code as far as interaction with
-        # the CE goes. It is used only for historical purposes and probably for display, where the
-        # shifter would like the pilot URL to use offline to query the CE. Such a shifter presumably
-        # knows exactly what they are doing.
         pilotAPI = "gsiftp://" + self.ceHost + "/" + pilot
         # Uncomment if Federico really really wants this and comment the above line
         # base_url = "gsiftp://" + self.ceHost
@@ -292,7 +249,7 @@ class AREXComputingElement(ARCComputingElement):
         if "://" in pilot:
             pilotREST = pilot.split("jobs/")[-1]
             return pilotREST
-        self.log.warning("Pilot already in REST format?", pilot)
+        self.log.warn("Pilot already in REST format?", "%s" % pilot)
         return pilot
 
     def _delegation(self, jobID):
@@ -307,8 +264,6 @@ class AREXComputingElement(ARCComputingElement):
             More info at
             https://www.nordugrid.org/arc/arc6/users/xrsl.html#delegationid
             https://www.nordugrid.org/arc/arc6/tech/rest/rest.html#delegation-functionality
-        Note that this is a two step procedure. First we upload the proxy. Then we sign and put back
-        the certificate that is returned by the first step. This saves the delegation "properly" on the CE.
 
         If the jobID is not empty:
             Query and return the delegation ID of the given job
@@ -323,33 +278,32 @@ class AREXComputingElement(ARCComputingElement):
             params = {"action": "new"}
             query = self.base_url + command
             proxy = X509Chain()
-            res = proxy.loadProxyFromFile(self.session.cert)
-            r = self.session.post(
+            res = proxy.loadProxyFromFile(self.s.cert)
+            r = self.s.post(
                 query, data=proxy.dumpAllToString(), headers=self.headers, params=params, timeout=self.arcRESTTimeout
             )
             dID = ""
             if r.ok:  # Get the delegation and "PUT" it in the CE ...
                 dID = r.headers.get("location", "")
-                data = proxy.generateChainFromRequestString(r.text, lifetime=4 * 12 * 3600)["Value"]
                 if len(dID) > 2:
                     dID = dID.split("new/")[-1]
                     command = "delegations/" + dID
                     query = self.base_url + command
-                    r1 = self.session.put(query, data=data, headers=self.headers, timeout=self.arcRESTTimeout)
+                    r1 = self.s.put(query, data=r.text, headers=self.headers, timeout=self.arcRESTTimeout)
                     if not r1.ok:
                         dID = ""
                 else:
                     dID = ""
             return dID
         else:  # Retrieve delegation for existing job
-            jobsJson = {"job": [{"id": jobID}]}  # job in ARC REST json format
+            jj = {"job": [{"id": jobID}]}  # job in ARC REST json format
             command = "jobs"
             params = {"action": "delegations"}
             query = self.base_url + command
-            r = self.session.post(query, data=json.dumps(jobsJson), headers=self.headers, timeout=self.arcRESTTimeout)
+            r = self.s.post(query, data=json.dumps(jj), headers=self.headers, timeout=self.arcRESTTimeout)
             dID = ""
             if r.ok:  # Check if the job has a delegation
-                p = r.json()
+                p = json.loads(r.text.replace("\n", ""))
                 if "delegation_id" in p["job"]:
                     dID = p["job"]["delegation_id"][0]
             return dID
@@ -369,7 +323,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.session.cert = Locations.getProxyLocation()
+        self.s.cert = Locations.getProxyLocation()
 
         self.log.verbose("Executable file path: %s" % executableFile)
         if not os.access(executableFile, 5):
@@ -385,33 +339,32 @@ class AREXComputingElement(ARCComputingElement):
         deleg = self._delegation("")
         deleText = ""
         if len(deleg) < 2:
-            self.log.warning("Could not get a delegation", "For CE %s", self.ceHost)
-            self.log.warning("Continue without a delegation")
+            self.log.warn("Could not get a delegation for CE %s", self.ceHost)
+            self.log.warn("Continue without a delegation")
         else:
             deleText = "(delegationid=%s)" % deleg
         # It is fairly simple to change to bulk submission. Should I do so?
         # https://www.nordugrid.org/arc/arc6/tech/rest/rest.html#job-submission-create-a-new-job
-        # Also : https://bugzilla.nordugrid.org/show_bug.cgi?id=4069
         for _ in range(numberOfJobs):
             # Get the job into the ARC way
             xrslString, diracStamp = self.__writeXRSL(executableFile)
             xrslString = xrslString + deleText  ### Needs to be tested.
-            self.log.debug("XRSL string submitted", "is %s" % xrslString)
-            self.log.debug("DIRAC stamp for job", "is %s" % diracStamp)
-            r = self.session.post(
-                query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout
-            )
-            if r.status_code == 201:
-                # Job successfully submitted. 201 is the code for successful submission
-                pilotJobReference = self._pilot_toAPI(r.json()["job"]["id"])
+            self.log.debug("XRSL string submitted is %s" % xrslString)
+            self.log.debug("DIRAC stamp for job is %s" % diracStamp)
+            r = self.s.post(query, data=xrslString, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
+            print("Job submission status : ", r.json()['job']['status-code'], type(r.json()['job']['status-code']))
+            jobInfo = json.loads(r.text)['job']
+            if r.ok and jobInfo['status-code'] != '500':
+                # Job successfully submitted. Should I just test for == 201?
+                pilotJobReference = self._pilot_toAPI(jobInfo["id"])
                 batchIDList.append(pilotJobReference)
                 stampDict[pilotJobReference] = diracStamp
                 self.log.debug("Successfully submitted job", "%s to CE %s" % (pilotJobReference, self.ceHost))
             else:
                 self.log.warn(
                     "Failed to submit job",
-                    "to CE %s with error - %s - and messages : %s and %s"
-                    % (self.ceHost, r.status_code, r.reason, r.json()),
+                    "to CE %s with error - %s - and message : %s"
+                    % (self.ceHost, jobInfo['status-code'], jobInfo['reason']),
                 )
                 self.log.debug("DIRAC stamp and ARC job", "%s : %s" % (diracStamp, xrslString))
                 break  # Boo hoo *sniff*
@@ -434,26 +387,24 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.session.cert = Locations.getProxyLocation()
+        self.s.cert = Locations.getProxyLocation()
 
         self.log.debug("Killing jobs", ",".join(jobIDList))
         jList = [self._pilot_toREST(job) for job in jobIDList]
 
         # List of jobs in json format for the REST query
-        jobsJson = {"job": [{"id": job} for job in jList]}
+        jj = {"job": [{"id": job} for job in jList]}
 
         command = "jobs"
         params = {"action": "kill"}
         query = self.base_url + command
         # Killing jobs should be fast - bulk timeout of 10 seconds * basicTimeoutValue should be okay(?)
-        r = self.session.post(
-            query, data=jobsJson, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout
-        )
+        r = self.s.post(query, data=jj, headers=self.headers, params=params, timeout=10.0 * self.arcRESTTimeout)
         if r.ok:
             # Job successfully submitted
-            self.log.debug("Successfully deleted jobs %s " % (r.json()))
+            self.log.debug("Successfully deleted jobs %s " % (json.loads(r.text)))
         else:
-            return S_ERROR("Failed to kill all these jobs: %s" % r.json())
+            return S_ERROR("Failed to kill all these jobs: %s" % json.loads(r.text))
 
         return S_OK()
 
@@ -475,7 +426,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.session.cert = Locations.getProxyLocation()
+        self.s.cert = Locations.getProxyLocation()
 
         # Try to find out which VO we are running for. Essential now for REST interface.
         res = getVOfromProxyGroup()
@@ -486,13 +437,13 @@ class AREXComputingElement(ARCComputingElement):
         command = "info"
         params = {"schema": "glue2"}
         query = self.base_url + command
-        r = self.session.get(query, headers=self.headers, params=params, timeout=5.0 * self.arcRESTTimeout)
+        r = self.s.get(query, headers=self.headers, params=params, timeout=5.0 * self.arcRESTTimeout)
 
         if not r.ok:
             res = S_ERROR("Unknown failure for CE %s. Is the CE down?" % self.ceHost)
             return res
 
-        p = r.json()
+        p = json.loads(r.text)
 
         # Look only in the relevant section out of the headache
         info = p["Domains"]["AdminDomain"]["Services"]["ComputingService"]["ComputingShare"]
@@ -511,41 +462,37 @@ class AREXComputingElement(ARCComputingElement):
     def _renewJobs(self, jobList):
         """Written for the REST interface - jobList is already in the REST format
         This function is called only by this class, NOT by the SiteDirector"""
-
-        # Get the new proxy once for all the jobs ...
-        newProxy = X509Chain()
-        res = newProxy.loadProxyFromFile(self.session.cert)
-
-        # Renew the jobs
         for job in jobList:
             # First get the delegation (proxy)
             dID = self._delegation(job)
-            if len(dID) < 2:  # No delegation. No renew.
+            if len(dID) < 2:  # No delegation.
                 continue
 
             # Get the proxy
             command = "delegations/" + dID
             params = {"action": "get"}
             query = self.base_url + command
-            r = self.session.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
-            proxy = X509Chain()
-            proxy.loadChainFromString(r.text)
+            r = self.s.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
+            proxy = X509Chain.loadChainFromString(r.text)
+            # Keep the following lines of code while waiting to test out the above line
+
+            # # We need to write the proxy out to get its information
+            # tmpProxyFile = "/tmp/arcRestRenew-" + makeGuid()[:8]
+            # with open(tmpProxyFile, 'w') as outFile: outFile.write(r.text)
+            # proxy = getProxyInfo(tmpProxyFile)
+            # os.unlink(tmpProxyFile) # Cleanup
 
             # Now test and renew the proxy
-            if not proxy["OK"]:
-                continue
-            timeLeft = proxy.getRemainingSecs()
+            if not proxy["OK"] or "secondsLeft" not in proxy["Value"]:
+                continue  # Proxy not okay or does not have "secondsLeft"
+            timeLeft = int(proxy["Value"]["secondsLeft"])
             if timeLeft < self.proxyTimeLeftBeforeRenewal:
                 self.log.debug("Renewing proxy for job", "%s whose proxy expires at %s" % (job, timeLeft))
                 # Proxy needs to be renewd - try to renew it
                 command = "delegations/" + dID
                 params = {"action": "renew"}
                 query = self.base_url + command
-                lHeaders = self.headers  # Local headers in this case
-                lHeaders["Content-Type"] = "application/x-pem-file"
-                r = self.session.post(
-                    query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout
-                )
+                r = self.s.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
                 if r.ok:
                     self.log.debug("Proxy successfully renewed", "for job %s" % job)
                 else:
@@ -564,7 +511,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.session.cert = Locations.getProxyLocation()
+        self.s.cert = Locations.getProxyLocation()
 
         jobTmpList = list(jobIDList)
         if isinstance(jobIDList, six.string_types):
@@ -579,23 +526,24 @@ class AREXComputingElement(ARCComputingElement):
         self.log.debug("Getting status of jobs : %s" % jobList)
 
         # List of jobs in json format for the REST query
-        jobsJson = {"job": [{"id": self._pilot_toREST(job)} for job in jobList]}
+        jj = {"job": [{"id": self._pilot_toREST(job)} for job in jobList]}
 
         command = "jobs"
         params = {"action": "status"}
         query = self.base_url + command
         # Assume it takes 1 second per pilot and timeout accordingly?
-        r = self.session.post(
-            query, data=jobsJson, headers=self.headers, params=params, timeout=float(len(jobList) * self.arcRESTTimeout)
+        r = self.s.post(
+            query, data=jj, headers=self.headers, params=params, timeout=float(len(jobList) * self.arcRESTTimeout)
         )
         if not r.ok:
             self.log.info("Failed getting the status of the jobs")
             return S_ERROR("Failed getting the status of the jobs")
 
+        p = json.loads(r.text)
         resultDict = {}
         jobsToRenew = []
         jobsToCancel = []
-        for job in r.json()["job"]:
+        for job in p["job"]:
             jobID = self._pilot_toAPI(job["id"])
             # ARC REST interface returns hyperbole
             arcState = job["state"].capitalize()
@@ -631,7 +579,7 @@ class AREXComputingElement(ARCComputingElement):
         if not result["OK"]:
             self.log.error("AREXComputingElement: failed to set up proxy", result["Message"])
             return result
-        self.session.cert = Locations.getProxyLocation()
+        self.s.cert = Locations.getProxyLocation()
 
         if ":::" in jobID:
             pilotRef, stamp = jobID.split(":::")
@@ -654,7 +602,6 @@ class AREXComputingElement(ARCComputingElement):
         ##### I am not sure I have understood how DIRAC works here
         ##### But I hope that the previous looks have confirmed that this is how
         ##### the WMSAdministrator expects the results.
-        ##### To be done next
         mycwd = os.getcwd()
         os.makedirs(workingDirectory)
         os.chdir(workingDirectory)  # Retrieve the outputs here
@@ -662,13 +609,13 @@ class AREXComputingElement(ARCComputingElement):
         job = self._pilot_toREST(pilotRef)
         query = self.base_url + command + job + "/session/ " + stamp + ".out"
         # Give the CE 10 seconds to return the log. Is this enough?
-        r = self.session.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
+        r = self.s.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
         if not r.ok:
             self.log.error("Error downloading stdout", "for %s: %s" % (job, r.text))
             return S_ERROR("Failed to retrieve at least some output for %s" % jobID)
         output = r.text
         query = self.base_url + command + job + "/session/ " + stamp + ".err"
-        r = self.session.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
+        r = self.s.get(query, headers=self.headers, timeout=10.0 * self.arcRESTTimeout)
         if not r.ok:
             self.log.error("Error downloading stderr", "for %s: %s" % (job, r.text))
             return S_ERROR("Failed to retrieve at least some output for %s" % jobID)
