@@ -9,25 +9,18 @@ from __future__ import print_function
 
 __RCSID__ = "$Id$"
 
-import six
 import os
-import stat
 
-import requests
 import json
+import requests
+import six
 
-from DIRAC import S_OK, S_ERROR, gConfig
-from DIRAC.ConfigurationSystem.Client.Helpers.Resources import getCESiteMapping
-from DIRAC.Core.Utilities.Subprocess import shellCall
-from DIRAC.Core.Utilities.File import makeGuid
-from DIRAC.Core.Utilities.List import breakListIntoChunks
+from DIRAC import S_OK, S_ERROR
 from DIRAC.Core.Security.ProxyInfo import getVOfromProxyGroup
-from DIRAC.Resources.Computing.ARCComputingElement import ARCComputingElement
-from DIRAC.Core.Security.ProxyInfo import getProxyInfo
 from DIRAC.Core.Security.X509Chain import X509Chain  # pylint: disable=import-error
 from DIRAC.Core.Security import Locations
-from DIRAC.Core.Utilities.ReturnValues import returnValueOrRaise
-from DIRAC.ConfigurationSystem.Client.Helpers.Path import cfgPath
+from DIRAC.Resources.Computing.ARCComputingElement import ARCComputingElement
+
 
 
 class AREXComputingElement(ARCComputingElement):
@@ -385,20 +378,17 @@ class AREXComputingElement(ARCComputingElement):
     #############################################################################
 
     def _renewJobs(self, jobList):
-        """Written for the REST interface - jobList is already in the REST format
+        """Written for the REST interface - jobList is already in the ARC format
         This function is called only by this class, NOT by the SiteDirector
         """
-
-        # List of jobs in json format for the REST query
-        jList = [self._DiracToArcID(job) for job in jobList]
-
         # Renew the jobs
-        for job in jList:
+        for job in jobList:
             # First get the delegation (proxy)
-            delegationID = self._getDelegation(job)
-            if not delegationID:
-                # No delegation. No renew.
+            result = self._getDelegation(job)
+            if not result["OK"]:
+                self.log.warn("Could not get a delegation from", "Job %s" % job)
                 continue
+            delegationID = result["Value"]
 
             # Prepare the command
             command = "delegations/" + delegationID
@@ -476,7 +466,6 @@ class AREXComputingElement(ARCComputingElement):
             self.log.info("Failed getting the status of the jobs", "%s - %s" % (response.status_code, response.reason))
             return S_ERROR("Failed getting the status of the jobs")
 
-        p = json.loads(r.text)
         resultDict = {}
         jobsToRenew = []
         jobsToCancel = []
