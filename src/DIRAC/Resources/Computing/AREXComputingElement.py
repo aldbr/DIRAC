@@ -124,8 +124,6 @@ class AREXComputingElement(ARCComputingElement):
             More info at
             https://www.nordugrid.org/arc/arc6/users/xrsl.html#delegationid
             https://www.nordugrid.org/arc/arc6/tech/rest/rest.html#delegation-functionality
-        Note that this is a two step procedure. First we upload the proxy. Then we sign and put back
-        the certificate that is returned by the first step. This saves the delegation "properly" on the CE.
 
         If the jobID is not empty:
             Query and return the delegation ID of the given job.
@@ -158,7 +156,6 @@ class AREXComputingElement(ARCComputingElement):
             delegationID = ""
             if response.ok:
                 delegationURL = response.headers.get("location", "")
-                data = proxy.generateChainFromRequestString(response.text, lifetime=4 * 12 * 3600)["Value"]
                 if delegationURL:
                     delegationID = delegationURL.split("new/")[-1]
                     # Prepare the command
@@ -166,7 +163,7 @@ class AREXComputingElement(ARCComputingElement):
                     query = self.base_url + command
 
                     # Submit the proxy
-                    response = self.session.put(query, data=data, headers=self.headers, timeout=self.arcRESTTimeout)
+                    response = self.session.put(query, data=response.text, headers=self.headers, timeout=self.arcRESTTimeout)
                     if not response.ok:
                         self.log.warn(
                             "Issue while interacting with the delegation",
@@ -361,7 +358,7 @@ class AREXComputingElement(ARCComputingElement):
         query = self.base_url + command
 
         # Submit the GET request
-        response = self.session.get(query, headers=self.headers, params=params, timeout=5.0 * self.arcRESTTimeout)
+        response = self.session.get(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
         if not response.ok:
             res = S_ERROR("Unknown failure for CE %s. Is the CE down?" % self.ceHost)
             return res
@@ -389,11 +386,8 @@ class AREXComputingElement(ARCComputingElement):
 
     def _renewJobs(self, jobList):
         """Written for the REST interface - jobList is already in the REST format
-        This function is called only by this class, NOT by the SiteDirector"""
-
-        # Get the new proxy once for all the jobs ...
-        newProxy = X509Chain()
-        res = newProxy.loadProxyFromFile(self.session.cert)
+        This function is called only by this class, NOT by the SiteDirector
+        """
 
         # List of jobs in json format for the REST query
         jList = [self._DiracToArcID(job) for job in jobList]
@@ -414,10 +408,10 @@ class AREXComputingElement(ARCComputingElement):
             # Submit the POST request to get the proxy
             response = self.session.post(query, headers=self.headers, params=params, timeout=self.arcRESTTimeout)
             proxy = X509Chain()
-            proxy.loadChainFromString(response.text)
+            res = proxy.loadChainFromString(response.text)
 
             # Now test and renew the proxy
-            if not proxy["OK"]:
+            if not res["OK"]:
                 continue
 
             timeLeft = proxy.getRemainingSecs()
@@ -427,10 +421,8 @@ class AREXComputingElement(ARCComputingElement):
                 command = "delegations/" + delegationID
                 params = {"action": "renew"}
                 query = self.base_url + command
-                lHeaders = self.headers  # Local headers in this case
-                lHeaders["Content-Type"] = "application/x-pem-file"
                 response = self.session.post(
-                    query, data=newProxy.dumpAllToString(), headers=lHeaders, params=params, timeout=self.arcRESTTimeout
+                    query, headers=self.headers, params=params, timeout=self.arcRESTTimeout
                 )
                 if response.ok:
                     self.log.debug("Proxy successfully renewed", "for job %s" % job)
@@ -484,6 +476,7 @@ class AREXComputingElement(ARCComputingElement):
             self.log.info("Failed getting the status of the jobs", "%s - %s" % (response.status_code, response.reason))
             return S_ERROR("Failed getting the status of the jobs")
 
+        p = json.loads(r.text)
         resultDict = {}
         jobsToRenew = []
         jobsToCancel = []
