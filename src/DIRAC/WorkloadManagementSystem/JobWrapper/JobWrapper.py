@@ -256,7 +256,9 @@ class JobWrapper:
         )
         if not result["OK"]:
             return result
-        self.jobExecutionCoordinator = result["Value"](jobArgs=self.jobArgs, ceArgs=self.ceArgs)
+        self.jobExecutionCoordinator = result["Value"](
+            jobArgs=self.jobArgs, ceArgs=self.ceArgs, workingDirectory=self.jobIDPath
+        )
 
     #############################################################################
     def __setInitialJobParameters(self):

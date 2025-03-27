@@ -1,3 +1,4 @@
+from pathlib import Path
 from DIRAC import S_OK
 
 
@@ -44,7 +45,7 @@ class JobExecutionCoordinator:
     - `postProcess(job)`
     """
 
-    def __init__(self, jobArgs: dict, ceArgs: dict) -> None:
+    def __init__(self, jobArgs: dict, ceArgs: dict, workingDirectory: Path) -> None:
         """
         Initialize the job execution coordinator.
 
@@ -53,6 +54,7 @@ class JobExecutionCoordinator:
         """
         self.jobArgs = jobArgs
         self.ceArgs = ceArgs
+        self.workingDirectory = workingDirectory
 
     def preProcess(self, command: str, exeEnv: dict):
         """
