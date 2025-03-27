@@ -394,6 +394,7 @@ class JobWrapper:
 
         if not (result := self.jobExecutionCoordinator.preProcess(command, exeEnv))["OK"]:
             self.log.error("Failed to pre-process the job", result["Message"])
+            self.__report(status=JobStatus.FAILED, minorStatus=JobMinorStatus.JOB_WRAPPER_PREPROCESSING, sendFlag=True)
 
         return result
 

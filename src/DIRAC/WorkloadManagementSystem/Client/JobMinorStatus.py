@@ -50,6 +50,8 @@ JOB_INSUFFICIENT_DISK = "Job has insufficient disk space to continue"
 #
 JOB_WRAPPER_INITIALIZATION = "Job Wrapper Initialization"
 #
+JOB_WRAPPER_PREPROCESSING = "Job Wrapper Preprocessing"
+#
 JOB_WRAPPER_EXECUTION = "JobWrapper execution"
 #
 MARKED_FOR_TERMINATION = "Marked for termination"
