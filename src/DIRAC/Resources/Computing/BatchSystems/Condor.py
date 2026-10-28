@@ -292,25 +292,34 @@ class Condor(object):
 
         jobsMetadata = json.loads(output)
 
-        # Get the status of the jobs in the history
-        condorHistCall = "condor_history %s -attributes %s -json" % (cmdJobs, STATE_ATTRIBUTES)
-        sp = subprocess.Popen(
-            shlex.split(condorHistCall),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-        output, _ = sp.communicate()
-        status = sp.returncode
+        # Get the status of the jobs no longer in the queue from the history
+        # condor_history reads the whole history file for IDs it cannot find, so only ask for the
+        # missing ones and stop as soon as they are all found
+        activeJobIDs = set("%s.%s" % (jobDict["ClusterId"], jobDict["ProcId"]) for jobDict in jobsMetadata)
+        missingJobIDs = [str(x) for x in jobIDList if str(x) not in activeJobIDs]
+        if missingJobIDs:
+            condorHistCall = "condor_history %s -match %s -attributes %s -json" % (
+                " ".join(missingJobIDs),
+                len(missingJobIDs),
+                STATE_ATTRIBUTES,
+            )
+            sp = subprocess.Popen(
+                shlex.split(condorHistCall),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            output, error = sp.communicate()
+            status = sp.returncode
 
-        if status != 0:
-            resultDict["Status"] = status
-            resultDict["Message"] = error
-            return resultDict
-        if not output:
-            output = "[]"
+            if status != 0:
+                resultDict["Status"] = status
+                resultDict["Message"] = error
+                return resultDict
+            if not output:
+                output = "[]"
 
-        jobsMetadata += json.loads(output)
+            jobsMetadata += json.loads(output)
 
         statusDict = {}
         # Build a set of job IDs found in jobsMetadata
